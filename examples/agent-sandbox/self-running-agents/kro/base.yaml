@@ -1,0 +1,11 @@
+# The one SraBase instance. Placeholders are filled by the wrapper's render()
+# (scripts/common.sh), so no account value is in this file.
+apiVersion: kro.run/v1alpha1
+kind: SraBase
+metadata:
+  name: sra
+spec:
+  prefix: sra
+  namespace: sra
+  accountID: "<ACCOUNT_ID>"
+  region: <AWS_REGION>

@@ -1,0 +1,381 @@
+# SraGateway: everything setup.sh makes after the bucket and the image, as one
+# kro graph of ACK and Kubernetes objects. Applied after the SraBase instance is
+# ACTIVE, the tool zip is in the run bucket and the agent image is pushed.
+# Starts from a graph proven in a live test of the same gateway path.
+#
+# Order comes from the ${...} references: the gateway role, tool role, log group,
+# policy engine, ServiceAccount and admission policy first (no dependencies);
+# then the tool function; the gateway; its target and the agent role; the Cedar
+# policy, the Pod Identity association, the egress rule and the agent config.
+# kro deletes in the reverse waves.
+#
+# Cluster scoped, so every namespaced child names schema.spec.namespace, which
+# the SraBase instance made.
+#
+# Never remove a field from spec.schema once this RGD is live: kro refuses the
+# instance CRD update and the instance stops reconciling, deletion included
+# (seen in a live test).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: sra-gateway
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: SraGateway
+    scope: Cluster
+    spec:
+      prefix: string | default="sra"
+      # The Project tag value on every AWS resource that takes tags.
+      project: string | default="self-running-agents"
+      namespace: string | default="sra"
+      accountID: string | required=true
+      region: string | required=true
+      clusterName: string | required=true
+      # The Bedrock inference profile the agent uses and the foundation models it
+      # routes to (setup.sh:208-209 reads them; the wrapper passes them in).
+      inferenceProfileARN: string | required=true
+      foundationModelARNs: "[]string | required=true"
+      # The tool zip the wrapper uploaded to the run bucket, and the base64
+      # SHA-256 of it (Lambda's CodeSha256 form). A new hash is how ACK learns
+      # the code changed and calls UpdateFunctionCode
+      # (lambda-controller pkg/resource/function/hooks.go:135-137, :571-583@v1.20.0).
+      toolCodeKey: string | required=true
+      toolCodeSHA256: string | required=true
+      # The agent's prompt, written to the agent-config ConfigMap as prompt.txt.
+      prompt: string | required=true
+    status:
+      gatewayID: ${gateway.status.gatewayID}
+      gatewayARN: ${gateway.status.ackResourceMetadata.arn}
+      gatewayURL: ${gateway.status.gatewayURL}
+      gatewayHost: ${url(gateway.status.gatewayURL).getHostname()}
+      targetID: ${target.status.targetID}
+      policyEngineID: ${engine.status.id}
+      policyEngineARN: ${engine.status.ackResourceMetadata.arn}
+      policyID: ${policy.status.id}
+      toolFunctionARN: ${tool.status.ackResourceMetadata.arn}
+      toolRoleARN: ${toolRole.status.ackResourceMetadata.arn}
+      gatewayRoleARN: ${gwRole.status.ackResourceMetadata.arn}
+      agentRoleARN: ${agentRole.status.ackResourceMetadata.arn}
+      podIdentityAssociationID: ${pia.status.associationID}
+  resources:
+    # ---- setup.sh step 1 (admission) -------------------------------------------
+    # Replaces the former deploy/admission.yaml at 3c347b1, the namespace filled in.
+    - id: admission
+      template:
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingAdmissionPolicy
+        metadata:
+          name: self-running-agents-${schema.spec.namespace}
+          labels: { app.kubernetes.io/managed-by: self-running-agents }
+        spec:
+          failurePolicy: Fail
+          matchConstraints:
+            resourceRules:
+              - apiGroups: [""]
+                apiVersions: ["v1"]
+                operations: ["CREATE", "UPDATE"]
+                resources: ["pods"]
+          validations:
+            - expression: "has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false"
+              message: "pods in this namespace must set automountServiceAccountToken: false"
+            - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'isolated-sandbox'"
+              message: "pods in this namespace must set runtimeClassName: isolated-sandbox"
+
+    - id: admissionBinding
+      template:
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingAdmissionPolicyBinding
+        metadata:
+          name: self-running-agents-${schema.spec.namespace}
+          labels: { app.kubernetes.io/managed-by: self-running-agents }
+        spec:
+          policyName: ${admission.metadata.name}
+          validationActions: [Deny]
+          matchResources:
+            namespaceSelector:
+              matchLabels: { kubernetes.io/metadata.name: "${schema.spec.namespace}" }
+
+    # ---- setup.sh step 4: the tool function, its log group and role -------------
+    - id: toolRole
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.prefix}-tool
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix}-tool
+          assumeRolePolicyDocument: |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}
+          inlinePolicies:
+            self-running-agents: |
+              {"Version":"2012-10-17","Statement":[{"Sid":"WriteItsOwnLogGroupOnly","Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:${schema.spec.region}:${schema.spec.accountID}:log-group:/aws/lambda/${schema.spec.prefix}-clock:*"}]}
+          tags:
+            - key: Project
+              value: ${schema.spec.project}
+            - key: ManagedBy
+              value: ${schema.spec.prefix}
+
+    # Made before the function, so it carries the tags and a one-day retention.
+    - id: logGroup
+      template:
+        apiVersion: cloudwatchlogs.services.k8s.aws/v1alpha1
+        kind: LogGroup
+        metadata:
+          name: ${schema.spec.prefix}-clock
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: /aws/lambda/${schema.spec.prefix}-clock
+          retentionDays: 1
+          tags:
+            Project: ${schema.spec.project}
+            ManagedBy: ${schema.spec.prefix}
+
+    # Code from the run bucket, not inline: the CRD types zipFile as bytes and
+    # kro cannot pass bytes from an instance value (seen in a live test).
+    - id: tool
+      readyWhen:
+        - ${tool.status.state == "Active"}
+      template:
+        apiVersion: lambda.services.k8s.aws/v1alpha1
+        kind: Function
+        metadata:
+          name: ${schema.spec.prefix}-clock
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix}-clock
+          packageType: Zip
+          runtime: python3.13
+          handler: handler.handler
+          role: ${toolRole.status.ackResourceMetadata.arn}
+          timeout: 10
+          memorySize: 128
+          code:
+            s3Bucket: ${schema.spec.prefix}-runs-${schema.spec.accountID}-${schema.spec.region}
+            s3Key: ${schema.spec.toolCodeKey}
+            sha256: ${schema.spec.toolCodeSHA256}
+          loggingConfig:
+            logFormat: Text
+            logGroup: ${logGroup.spec.name}
+          tags:
+            Project: ${schema.spec.project}
+            ManagedBy: ${schema.spec.prefix}
+
+    # ---- setup.sh step 5: the policy engine ----------------------------------------
+    # Policy engine and policy names allow no dashes (common.sh:77).
+    - id: engine
+      readyWhen:
+        - ${engine.status.status == "ACTIVE"}
+      template:
+        apiVersion: bedrockagentcorecontrol.services.k8s.aws/v1alpha1
+        kind: PolicyEngine
+        metadata:
+          name: ${schema.spec.prefix}-policy
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix.replace('-', '_')}_policy
+          description: Cedar policies for the self-running-agents gateway
+          tags:
+            Project: ${schema.spec.project}
+            ManagedBy: ${schema.spec.prefix}
+
+    # ---- setup.sh step 6: the gateway role and the gateway --------------------------
+    # The role names the function, the policy engine and the gateway by name
+    # pattern, not by their status, so it depends on nothing and is made at the
+    # start of the graph: a role made seconds before CreateGateway fails IAM
+    # propagation, ACK marks that ACK.Terminal and does not retry (seen in a live test).
+    # kro cannot make Role and Gateway depend on each other, so this is setup.sh's
+    # first pass (:149-151), not its second with the exact gateway ARN (:172-174).
+    - id: gwRole
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.prefix}-gateway
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix}-gateway
+          assumeRolePolicyDocument: |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"bedrock-agentcore.amazonaws.com"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"aws:SourceAccount":"${schema.spec.accountID}"},"ArnLike":{"aws:SourceArn":"arn:aws:bedrock-agentcore:${schema.spec.region}:${schema.spec.accountID}:gateway/*"}}}]}
+          inlinePolicies:
+            self-running-agents: |
+              {"Version":"2012-10-17","Statement":[{"Sid":"InvokeTheOneToolFunction","Effect":"Allow","Action":"lambda:InvokeFunction","Resource":"arn:aws:lambda:${schema.spec.region}:${schema.spec.accountID}:function:${schema.spec.prefix}-clock"},{"Sid":"ReadThePolicyEngine","Effect":"Allow","Action":"bedrock-agentcore:GetPolicyEngine","Resource":"arn:aws:bedrock-agentcore:${schema.spec.region}:${schema.spec.accountID}:policy-engine/${schema.spec.prefix.replace('-', '_')}_policy-*"},{"Sid":"AskThePolicyEngineForADecision","Effect":"Allow","Action":["bedrock-agentcore:AuthorizeAction","bedrock-agentcore:PartiallyAuthorizeActions"],"Resource":["arn:aws:bedrock-agentcore:${schema.spec.region}:${schema.spec.accountID}:policy-engine/${schema.spec.prefix.replace('-', '_')}_policy-*","arn:aws:bedrock-agentcore:${schema.spec.region}:${schema.spec.accountID}:gateway/${schema.spec.prefix}-gw-*"]}]}
+          tags:
+            - key: Project
+              value: ${schema.spec.project}
+            - key: ManagedBy
+              value: ${schema.spec.prefix}
+
+    - id: gateway
+      readyWhen:
+        - ${gateway.status.status == "READY"}
+      template:
+        apiVersion: bedrockagentcorecontrol.services.k8s.aws/v1alpha1
+        kind: Gateway
+        metadata:
+          name: ${schema.spec.prefix}-gw
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix}-gw
+          roleARN: ${gwRole.status.ackResourceMetadata.arn}
+          protocolType: MCP
+          authorizerType: AWS_IAM
+          policyEngineConfiguration:
+            arn: ${engine.status.ackResourceMetadata.arn}
+            mode: ENFORCE
+          tags:
+            Project: ${schema.spec.project}
+            ManagedBy: ${schema.spec.prefix}
+
+    # ---- setup.sh step 7: the target and the Cedar policy ---------------------------
+    # Tool schemas as setup.sh:180-185; inputSchema is a JSON string in the CRD.
+    # GatewayTarget takes no tags.
+    - id: target
+      readyWhen:
+        - ${target.status.status == "READY"}
+      template:
+        apiVersion: bedrockagentcorecontrol.services.k8s.aws/v1alpha1
+        kind: GatewayTarget
+        metadata:
+          name: ${schema.spec.prefix}-clock
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: clock
+          gatewayIdentifier: ${gateway.status.gatewayID}
+          credentialProviderConfigurations:
+            - credentialProviderType: GATEWAY_IAM_ROLE
+          targetConfiguration:
+            mcp:
+              lambda:
+                lambdaARN: ${tool.status.ackResourceMetadata.arn}
+                toolSchema:
+                  inlinePayload:
+                    - name: get_time
+                      description: Read the current time in an IANA time zone. Read-only.
+                      inputSchema: '{"type":"object","properties":{"timezone":{"type":"string","description":"IANA time zone, such as UTC"}},"required":["timezone"]}'
+                    - name: get_host_info
+                      description: Read the tool function's own name, Region and memory size. Read-only.
+                      inputSchema: '{"type":"object","properties":{}}'
+
+    # Replaces the former policy/allow-get-time.cedar at 3c347b1: the agent role may call clock___get_time on
+    # this gateway and nothing else. It references the target so it is made
+    # after the target is READY, as setup.sh orders it (:192-201). Policy takes
+    # no tags.
+    - id: policy
+      readyWhen:
+        - ${policy.status.status == "ACTIVE"}
+      template:
+        apiVersion: bedrockagentcorecontrol.services.k8s.aws/v1alpha1
+        kind: Policy
+        metadata:
+          name: ${schema.spec.prefix}-allow-get-time
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix.replace('-', '_')}_allow_get_time
+          description: Permit only clock___get_time for the agent role (target ${target.status.targetID})
+          policyEngineID: ${engine.status.id}
+          validationMode: FAIL_ON_ANY_FINDINGS
+          definition:
+            cedar:
+              statement: |
+                permit (
+                  principal == AgentCore::IamEntity::"arn:aws:sts::${schema.spec.accountID}:assumed-role/${agentRole.spec.name}",
+                  action == AgentCore::Action::"clock___get_time",
+                  resource == AgentCore::Gateway::"${gateway.status.ackResourceMetadata.arn}"
+                );
+
+    # ---- setup.sh step 8: the agent role and its Pod Identity association -----------
+    # Replaces the former iam/agent-trust.json and iam/agent-policy.json at 3c347b1, values filled in.
+    - id: agentRole
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.prefix}-agent
+          namespace: ${schema.spec.namespace}
+        spec:
+          name: ${schema.spec.prefix}-agent
+          assumeRolePolicyDocument: |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"],"Condition":{"StringEquals":{"aws:SourceAccount":"${schema.spec.accountID}","aws:RequestTag/eks-cluster-arn":"arn:aws:eks:${schema.spec.region}:${schema.spec.accountID}:cluster/${schema.spec.clusterName}","aws:RequestTag/kubernetes-namespace":"${schema.spec.namespace}","aws:RequestTag/kubernetes-service-account":"agent"}}}]}
+          inlinePolicies:
+            # json.marshal, because the foundation model ARNs are a list.
+            self-running-agents: >-
+              ${json.marshal({"Version": "2012-10-17", "Statement": [
+              {"Sid": "InvokeTheOneInferenceProfileTheAgentUses", "Effect": "Allow", "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"], "Resource": schema.spec.inferenceProfileARN},
+              {"Sid": "InvokeTheFoundationModelsThatProfileRoutesTo", "Effect": "Allow", "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"], "Resource": schema.spec.foundationModelARNs},
+              {"Sid": "CallTheOneGateway", "Effect": "Allow", "Action": "bedrock-agentcore:InvokeGateway", "Resource": gateway.status.ackResourceMetadata.arn},
+              {"Sid": "StoreRunOutputOnly", "Effect": "Allow", "Action": "s3:PutObject", "Resource": "arn:aws:s3:::" + schema.spec.prefix + "-runs-" + schema.spec.accountID + "-" + schema.spec.region + "/runs/*"}
+              ]})}
+          tags:
+            - key: Project
+              value: ${schema.spec.project}
+            - key: ManagedBy
+              value: ${schema.spec.prefix}
+
+    # Replaces the former deploy/serviceaccount.yaml at 3c347b1 (setup.sh step 9, made here so the association
+    # can name it).
+    - id: agentSA
+      template:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: agent
+          namespace: ${schema.spec.namespace}
+        automountServiceAccountToken: false
+
+    - id: pia
+      template:
+        apiVersion: eks.services.k8s.aws/v1alpha1
+        kind: PodIdentityAssociation
+        metadata:
+          name: ${schema.spec.prefix}-agent
+          namespace: ${schema.spec.namespace}
+        spec:
+          clusterName: ${schema.spec.clusterName}
+          namespace: ${agentSA.metadata.namespace}
+          serviceAccount: ${agentSA.metadata.name}
+          roleARN: ${agentRole.status.ackResourceMetadata.arn}
+          tags:
+            Project: ${schema.spec.project}
+            ManagedBy: ${schema.spec.prefix}
+
+    # ---- setup.sh step 9: the egress rule and the agent's configuration -------------
+    # Replaces the former deploy/egress.yaml at 3c347b1, the gateway host read from the gateway's URL.
+    - id: egress
+      template:
+        apiVersion: networking.k8s.aws/v1alpha1
+        kind: ApplicationNetworkPolicy
+        metadata:
+          name: agent-egress
+          namespace: ${schema.spec.namespace}
+        spec:
+          podSelector: { matchLabels: { app.kubernetes.io/name: agent } }
+          policyTypes: [Ingress, Egress]
+          egress:
+            - to: [ { ipBlock: { cidr: 0.0.0.0/0 } } ]
+              ports: [ { protocol: UDP, port: 53 }, { protocol: TCP, port: 53 } ]
+            # The EKS Pod Identity agent on the node, where the pod's credentials come from.
+            - to: [ { ipBlock: { cidr: 169.254.170.23/32 } } ]
+              ports: [ { protocol: TCP, port: 80 } ]
+            - to:
+                - domainNames:
+                    - bedrock-runtime.${schema.spec.region}.amazonaws.com
+                    - ${url(gateway.status.gatewayURL).getHostname()}
+                    - ${schema.spec.prefix}-runs-${schema.spec.accountID}-${schema.spec.region}.s3.${schema.spec.region}.amazonaws.com
+              ports: [ { protocol: TCP, port: 443 } ]
+
+    # The agent-config ConfigMap setup.sh:229-235 writes: mcp.json (the gateway
+    # through mcp-proxy-for-aws) and prompt.txt.
+    - id: agentConfig
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: agent-config
+          namespace: ${schema.spec.namespace}
+        data:
+          mcp.json: >-
+            ${json.marshal({"mcpServers": {"gateway": {"type": "stdio", "command": "/opt/mcp/bin/mcp-proxy-for-aws-cli",
+            "args": [gateway.status.gatewayURL, "--service", "bedrock-agentcore", "--region", schema.spec.region, "--disable-telemetry", "--log-level", "WARNING"]}}})}
+          prompt.txt: ${schema.spec.prompt}

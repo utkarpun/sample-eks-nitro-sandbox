@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prove the sample both ways: one agent run that works end to end, and one
+# Check the sample both ways: one agent run that works end to end, and one
 # refusal for each thing that is meant to refuse. Each check reads PASS or FAIL
 # from the run's own output, and the raw output is kept in LOG_DIR.
 #
@@ -8,8 +8,9 @@
 #   NC1  in the T run, the egress gate's connections to a host the egress rule does not name failed
 #   NC2  a call to get_host_info, which the Cedar policy does not permit, is refused by the gateway
 #   NC4  the egress gate stops a run when its canary host is reachable
-#   NC3  admission refuses a pod that mounts a service-account token, and accepts one that does not
+#   NC3  admission refuses a pod that automounts the service-account token, and accepts one that does not
 source "$(dirname "$0")/common.sh" || exit 1
+load_status   # the namespace (NC3) and Region (NC4), from the instances
 set +e
 LOG_DIR="${LOG_DIR:-$SAMPLE_DIR/../../../tmp/$SAMPLE}"
 mkdir -p "$LOG_DIR"
@@ -77,7 +78,7 @@ grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run'
 line="$(grep -E "^sra: egress gate: ${EGRESS_CANARY:-example.com}:443 failed to connect 3 times" "$LOG_DIR/T.log")"
 verdict NC1 $? "${line:-no gate line in T.log}"
 
-# NC4: the egress gate fails closed. Pointed at a host the rule does allow, it
+# NC4: the egress gate stops a run when its canary answers. Pointed at a host the rule does allow, it
 # never sees a connection fail, so the run must stop before the tool call it was given.
 EGRESS_CANARY="bedrock-runtime.$AWS_REGION.amazonaws.com" "$HERE/run.sh" tools "${TARGET}___get_time" > "$LOG_DIR/NC4.log" 2>&1; nrc=$?
 line="$(grep -E '^sra: egress gate: ' "$LOG_DIR/NC4.log" | tr '\n' ' ')"

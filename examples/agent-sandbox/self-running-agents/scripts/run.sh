@@ -12,7 +12,7 @@
 # node once the pod has finished, and the logs with it. The run's output is also
 # stored in the run bucket under runs/<run id>/ (agent/run.sh).
 source "$(dirname "$0")/common.sh" || exit 1
-require_commands aws python3 sha256sum "$KUBECTL"
+require_commands sha256sum od "$KUBECTL"
 
 MODE="${1:-agent}"; shift || true
 PROBE_CALLS=""
@@ -25,13 +25,12 @@ esac
 EGRESS_CANARY="${EGRESS_CANARY:-example.com}"
 [[ "$EGRESS_CANARY" =~ ^[A-Za-z0-9.-]+$ ]] || die "EGRESS_CANARY must be a host name"
 
-rc=0; namespace_is_ours || rc=$?
-[[ $rc -eq 0 ]] || die "namespace $NAMESPACE is not this sample's (or could not be read); run ./scripts/setup.sh first"
-resolve_account
+# Namespace, bucket, image repository, Region and model, from the two instances.
+load_status
 RUN_ID="$(date -u +%Y%m%dt%H%M%Sz)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
 JOB="agent-$MODE-$RUN_ID"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
-IMAGE="$(image_uri)"
+IMAGE="$(image_uri "$REPOSITORY_URI")" || exit 1
 render "$SAMPLE_DIR/deploy/run-job.yaml" -e "s|<JOB_NAME>|$JOB|g" -e "s|<RUN_ID>|$RUN_ID|g" \
   -e "s|<RUN_MODE>|$MODE|g" -e "s|<PROBE_CALLS>|$PROBE_CALLS|g" -e "s|<EGRESS_CANARY>|$EGRESS_CANARY|g" -e "s|<IMAGE>|$IMAGE|g" > "$WORK/job.yaml"
 

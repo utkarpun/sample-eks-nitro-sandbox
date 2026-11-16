@@ -2,13 +2,19 @@
 # Shared settings, readings and guards for the self-running-agents scripts.
 # Sourced, never run on its own.
 #
-# Every kubectl call goes through kc(), which pins --context and --namespace, so
-# a run never depends on the machine's current context or on a default
-# namespace. Cluster-scoped calls go through kc_cluster.
+# Every AWS resource is made by ACK from the two kro graphs in kro/; these
+# scripts only apply them, wait, read their status, and read AWS back.
+# Every kubectl call goes through kc() or kc_cluster(), which pin --context, so
+# a run never depends on the machine's current context.
 set -euo pipefail
 
 SAMPLE=self-running-agents
 TARGET=clock                # the gateway target; its tools are clock___<tool>
+# The names kro/base.yaml and kro/gateway.yaml set (prefix, namespace and the
+# instance name), and bootstrap's var.prefix, which scopes the ACK role to them.
+PREFIX=sra
+NAMESPACE=sra
+INSTANCE=sra
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAMPLE_DIR="$(cd "$HERE/.." && pwd)"
@@ -20,7 +26,7 @@ done
 
 # Load .env as defaults, never sourced: only the keys below are read. A value
 # already set in the environment wins over the file.
-_ENV_KEYS='CLUSTER_NAME|AWS_REGION|AWS_PROFILE|KUBE_CONTEXT|NAMESPACE|BEDROCK_MODEL_ID|ECR_REPOSITORY|NAME_PREFIX|RUN_BUCKET|KUBECTL'
+_ENV_KEYS='CLUSTER_NAME|AWS_REGION|AWS_PROFILE|KUBE_CONTEXT|BEDROCK_MODEL_ID|PROJECT_TAG|KUBECTL'
 if [[ -f "$SAMPLE_DIR/.env" && ! -r "$SAMPLE_DIR/.env" ]]; then
   echo "error: $SAMPLE_DIR/.env exists but is not readable; fix its permissions and re-run" >&2
   exit 1
@@ -32,11 +38,8 @@ if [[ -f "$SAMPLE_DIR/.env" ]]; then
       AWS_REGION)       AWS_REGION="${AWS_REGION:-$_v}" ;;
       AWS_PROFILE)      AWS_PROFILE="${AWS_PROFILE:-$_v}" ;;
       KUBE_CONTEXT)     KUBE_CONTEXT="${KUBE_CONTEXT:-$_v}" ;;
-      NAMESPACE)        NAMESPACE="${NAMESPACE:-$_v}" ;;
       BEDROCK_MODEL_ID) BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-$_v}" ;;
-      ECR_REPOSITORY)   ECR_REPOSITORY="${ECR_REPOSITORY:-$_v}" ;;
-      NAME_PREFIX)      NAME_PREFIX="${NAME_PREFIX:-$_v}" ;;
-      RUN_BUCKET)       RUN_BUCKET="${RUN_BUCKET:-$_v}" ;;
+      PROJECT_TAG)      PROJECT_TAG="${PROJECT_TAG:-$_v}" ;;
       KUBECTL)          KUBECTL="${KUBECTL:-$_v}" ;;
     esac
   done < <(grep -E "^[[:space:]]*($_ENV_KEYS)[[:space:]]*=" "$SAMPLE_DIR/.env" \
@@ -48,35 +51,19 @@ AWS_REGION="${AWS_REGION:-us-west-2}"
 export AWS_REGION
 if [[ -n "${AWS_PROFILE:-}" ]]; then export AWS_PROFILE; else unset AWS_PROFILE; fi
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
-NAMESPACE="${NAMESPACE:-self-running-agents}"
 BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-us.anthropic.claude-sonnet-5-5}"
-ECR_REPOSITORY="${ECR_REPOSITORY:-self-running-agents}"
-NAME_PREFIX="${NAME_PREFIX:-self-running-agents}"
-RUN_BUCKET="${RUN_BUCKET:-}"
+PROJECT_TAG="${PROJECT_TAG:-self-running-agents}"   # the Project tag on every AWS resource
 KUBECTL="${KUBECTL:-kubectl}"
 
-# Names go into sed substitutions and AWS names, so keep them to safe shapes.
-[[ "$NAMESPACE" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] \
-  || { echo "error: NAMESPACE must be a DNS label; got '$NAMESPACE'" >&2; exit 1; }
-[[ "$NAME_PREFIX" =~ ^[a-z][a-z0-9-]{0,30}[a-z0-9]$ ]] \
-  || { echo "error: NAME_PREFIX must be lower-case letters, digits and dashes, 2 to 32 characters, starting with a letter; got '$NAME_PREFIX'" >&2; exit 1; }
+# Values go into sed substitutions, so keep them to safe shapes.
 [[ "$BEDROCK_MODEL_ID" =~ ^[A-Za-z0-9._:-]+$ ]] \
   || { echo "error: BEDROCK_MODEL_ID has characters a model id does not have; got '$BEDROCK_MODEL_ID'" >&2; exit 1; }
-[[ "$RUN_BUCKET" =~ ^([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])?$ ]] \
-  || { echo "error: RUN_BUCKET must be an S3 bucket name, or empty; got '$RUN_BUCKET'" >&2; exit 1; }
-[[ "$ECR_REPOSITORY" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]] \
-  || { echo "error: ECR_REPOSITORY must be an ECR repository name; got '$ECR_REPOSITORY'" >&2; exit 1; }
-
-# The AWS names, each derived from NAME_PREFIX so a second copy of the sample in
-# the same account only needs a different prefix.
-AGENT_ROLE="$NAME_PREFIX-agent"
-GATEWAY_ROLE="$NAME_PREFIX-gateway"
-TOOL_ROLE="$NAME_PREFIX-tool"
-TOOL_FUNCTION="$NAME_PREFIX-clock"
-GATEWAY_NAME="$NAME_PREFIX-gw"
-POLICY_ENGINE_NAME="${NAME_PREFIX//-/_}_policy"   # policy engine names allow no dashes
-POLICY_NAME="${NAME_PREFIX//-/_}_allow_get_time"
-TOOL_LOG_GROUP="/aws/lambda/$TOOL_FUNCTION"
+[[ "$PROJECT_TAG" =~ ^[A-Za-z0-9._:/=+@-]{1,256}$ ]] \
+  || { echo "error: PROJECT_TAG must be a tag value without spaces; got '$PROJECT_TAG'" >&2; exit 1; }
+[[ "$CLUSTER_NAME" =~ ^[A-Za-z0-9_-]*$ ]] \
+  || { echo "error: CLUSTER_NAME has characters a cluster name does not have; got '$CLUSTER_NAME'" >&2; exit 1; }
+[[ "$AWS_REGION" =~ ^[a-z0-9-]+$ ]] \
+  || { echo "error: AWS_REGION is not a Region name; got '$AWS_REGION'" >&2; exit 1; }
 
 kc() {
   if [[ -n "$KUBE_CONTEXT" ]]; then
@@ -103,34 +90,11 @@ show_context() {
   fi
 }
 
-# The account the AWS CLI is pointed at, and the names that depend on it.
+# The account the AWS CLI is pointed at.
 resolve_account() {
   ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)" \
     || die "could not read the AWS account (aws sts get-caller-identity failed)"
   [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]] || die "aws sts get-caller-identity returned '$ACCOUNT_ID', not an account id"
-  RUN_BUCKET="${RUN_BUCKET:-$NAME_PREFIX-runs-$ACCOUNT_ID-$AWS_REGION}"
-  AGENT_ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/$AGENT_ROLE"
-  GATEWAY_ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/$GATEWAY_ROLE"
-  TOOL_ROLE_ARN="arn:aws:iam::$ACCOUNT_ID:role/$TOOL_ROLE"
-  TOOL_FUNCTION_ARN="arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:$TOOL_FUNCTION"
-}
-
-# ---------------------------------------------------------------------------
-# What is the sample's. In the cluster the namespace label is the mark; in AWS
-# the ManagedBy tag is. A read that fails means "could not determine".
-# ---------------------------------------------------------------------------
-NS_LABEL_KEY="app.kubernetes.io/managed-by"
-MANAGED_BY="$SAMPLE"
-
-# namespace_is_ours: 0 ours, 1 someone else's, 2 could not read, 3 absent
-namespace_is_ours() {
-  local out rc
-  out="$(kc_cluster get namespace "$NAMESPACE" --ignore-not-found \
-    -o "jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}{\"|\"}{.metadata.name}" 2>/dev/null)"
-  rc=$?
-  [[ $rc -ne 0 ]] && return 2
-  [[ "$out" == "|" || -z "$out" ]] && return 3
-  [[ "${out%%|*}" == "$MANAGED_BY" ]]
 }
 
 # resource_exists <runner> <kind/name...>: 0 exists, 1 absent, 2 read failed
@@ -167,58 +131,43 @@ require_network_policy_enforcement() {
   echo "network policy enforcement is on, and ApplicationNetworkPolicy is available"
 }
 
-# ---------------------------------------------------------------------------
-# AgentCore readings. Each prints the id, or nothing when the name is absent;
-# a failed list is a failure, never "absent".
-# ---------------------------------------------------------------------------
-gateway_id() {
-  aws bedrock-agentcore-control list-gateways --output json \
-    | python3 -c 'import sys,json; n=sys.argv[1]; print(next((g["gatewayId"] for g in json.load(sys.stdin).get("items",[]) if g.get("name")==n),""))' "$GATEWAY_NAME"
+# instance_field <kind> <jsonpath>: one field of the sample's kro instance.
+instance_field() { kc_cluster get "$1" "$INSTANCE" -o "jsonpath=$2" 2>/dev/null; }
+
+# load_status: what run.sh and test.sh need, read from the two instances.
+load_status() {
+  local b g st gst
+  b="$(instance_field srabase '{.status.state}|{.status.namespace}|{.status.bucketName}|{.status.repositoryURI}|{.spec.region}')" \
+    || die "could not read SraBase $INSTANCE; run ./scripts/setup.sh first"
+  IFS='|' read -r st NAMESPACE RUN_BUCKET REPOSITORY_URI AWS_REGION <<<"$b"
+  g="$(instance_field sragateway '{.status.state}|{.spec.inferenceProfileARN}')" \
+    || die "could not read SraGateway $INSTANCE; run ./scripts/setup.sh first"
+  IFS='|' read -r gst BEDROCK_MODEL_ID <<<"$g"
+  BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID##*/}"
+  [[ "$st" == ACTIVE && "$gst" == ACTIVE ]] \
+    || die "SraBase reads '${st:-<none>}' and SraGateway '${gst:-<none>}', not both ACTIVE; run ./scripts/setup.sh"
+  [[ -n "$NAMESPACE" && -n "$RUN_BUCKET" && -n "$REPOSITORY_URI" && -n "$BEDROCK_MODEL_ID" ]] \
+    || die "an instance status field is empty; run ./scripts/setup.sh"
 }
-policy_engine_id() {
-  aws bedrock-agentcore-control list-policy-engines --output json \
-    | python3 -c 'import sys,json; n=sys.argv[1]; print(next((p["policyEngineId"] for p in json.load(sys.stdin).get("policyEngines",[]) if p.get("name")==n),""))' "$POLICY_ENGINE_NAME"
+
+# wait_active <kind> <seconds>: wait for the instance's state ACTIVE; on a
+# timeout print what ACK reports for each object in the namespace.
+wait_active() {
+  if kc_cluster wait --for=jsonpath='{.status.state}'=ACTIVE "$1/$INSTANCE" --timeout="$2s"; then return 0; fi
+  echo "$1 $INSTANCE is not ACTIVE after $2 s. Its conditions, then each AWS object as ACK sees it:" >&2
+  instance_field "$1" '{range .status.conditions[*]}{.type}={.status} {.message}{"\n"}{end}' >&2 || true
+  kc get "$(ack_kinds)" -o 'custom-columns=KIND:.kind,NAME:.metadata.name,SYNCED:.status.conditions[?(@.type=="ACK.ResourceSynced")].status,TERMINAL:.status.conditions[?(@.type=="ACK.Terminal")].message' >&2 || true
+  die "$1 $INSTANCE did not become ACTIVE"
 }
-# tag_is_ours <arn>: 0 tagged ManagedBy=<sample>, 1 not, 2 could not read
-tag_is_ours() {
-  local v
-  v="$(aws bedrock-agentcore-control list-tags-for-resource --resource-arn "$1" \
-        --query 'tags.ManagedBy' --output text 2>/dev/null)" || return 2
-  [[ "$v" == "$MANAGED_BY" ]]
-}
-# wait_status <what> <command...>: wait until the command prints READY or ACTIVE
-wait_status() {
-  local what=$1; shift
-  local s deadline=$((SECONDS + 300))
-  while :; do
-    s="$("$@" 2>/dev/null || echo READ_FAILED)"
-    case "$s" in
-      READY|ACTIVE) echo "  $what is $s"; return 0 ;;
-      READ_FAILED) ;;
-      *FAILED*) die "$what reached $s" ;;
-    esac
-    ((SECONDS >= deadline)) && die "$what is still $s after 300 s"
-    sleep 5
-  done
+ack_kinds() {
+  echo buckets.s3.services.k8s.aws,repositories.ecr.services.k8s.aws,roles.iam.services.k8s.aws,loggroups.cloudwatchlogs.services.k8s.aws,functions.lambda.services.k8s.aws,policyengines.bedrockagentcorecontrol.services.k8s.aws,gateways.bedrockagentcorecontrol.services.k8s.aws,gatewaytargets.bedrockagentcorecontrol.services.k8s.aws,policies.bedrockagentcorecontrol.services.k8s.aws,podidentityassociations.eks.services.k8s.aws
 }
 
 # ---------------------------------------------------------------------------
-# AWS teardown verification with three outcomes, as in the other samples: the
-# service's own "not found" error means gone; success means still there; any
+# AWS read-back with three outcomes: the service's own "not found" error (or a
+# count of 0) means gone; success (or a count above 0) means still there; any
 # other failure means could not determine.
 # ---------------------------------------------------------------------------
-aws_exists() {
-  local pattern=$1; shift
-  [[ "$1" == "--" ]] && shift
-  local out rc=0
-  out="$("$@" 2>&1)" || rc=$?
-  [[ $rc -eq 0 ]] && return 0
-  grep -Fq "An error occurred ($pattern)" <<<"$out" && return 1
-  AWS_LAST_ERROR="$(tr '\n' ' ' <<<"$out")"
-  return 2
-}
-AWS_LAST_ERROR=""
-
 AWS_CLEAN_FAIL=0
 aws_verify_absent() {
   local what=$1 pattern=$2; shift 2
@@ -233,6 +182,21 @@ aws_verify_absent() {
   echo "  INCOMPLETE: could not determine whether $what is gone: $(tr '\n' ' ' <<<"$out")" >&2
   AWS_CLEAN_FAIL=$((AWS_CLEAN_FAIL + 1)); return 1
 }
+# aws_verify_none <what> -- <command printing a count>: re-reads for up to 60 s,
+# because AgentCore deletes finish after the call returns.
+aws_verify_none() {
+  local what=$1; shift
+  [[ "$1" == "--" ]] && shift
+  local n i
+  for i in $(seq 1 12); do
+    n="$("$@" 2>&1)" || { echo "  INCOMPLETE: could not determine whether $what is gone: $(tr '\n' ' ' <<<"$n")" >&2
+                          AWS_CLEAN_FAIL=$((AWS_CLEAN_FAIL + 1)); return 1; }
+    [[ "$n" == "0" ]] && { echo "  $what is gone"; return 0; }
+    [[ $i -lt 12 ]] && sleep 5
+  done
+  echo "  INCOMPLETE: $what is still present (count $n)" >&2
+  AWS_CLEAN_FAIL=$((AWS_CLEAN_FAIL + 1)); return 1
+}
 
 # image_tag: the first 16 hex characters of the sha256 of the Dockerfile and
 # every file under agent/, so a change to either builds a new image and the same
@@ -243,7 +207,8 @@ image_tag() {
   [[ "$t" =~ ^[0-9a-f]{16}$ ]] || die "could not hash Dockerfile and agent/ (is sha256sum installed?)"
   echo "$t"
 }
-image_uri() { echo "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$(image_tag)"; }
+# image_uri <repository URI>
+image_uri() { local t; t="$(image_tag)" || exit 1; echo "$1:$t"; }
 
 # render <file> [extra sed expressions...]: print a manifest with the sample's
 # placeholders filled in. Files are rendered and then applied from a file.
