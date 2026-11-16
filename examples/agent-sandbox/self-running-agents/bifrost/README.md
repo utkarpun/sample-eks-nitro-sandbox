@@ -89,7 +89,8 @@ names `bfx-bifrost` and `bfx-bifrost-db` and the tag `ManagedBy=bfx` match its
 `namespace.yaml` and `instance.yaml` together.
 
 The cluster, Region, kube context and model come from the sample's `.env`, as for the agent
-(`CLUSTER_NAME`, `AWS_REGION`, `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`). `apply.sh` writes the
+(`CLUSTER_NAME`, `AWS_REGION`, `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`). The commands on this page use
+these values, plus `AWS_PROFILE`; leave out `--context` when `KUBE_CONTEXT` is empty. `apply.sh` writes the
 Region and model into the instance (the role's policy and egress rule) and into
 `values.yaml` (Bifrost's provider key and the key's allowed model). A different model also
 needs its entries in `pricing/`.
@@ -154,7 +155,7 @@ upstream.
 
 ## Stop it
 
-- `kubectl --context <KUBE_CONTEXT> -n bfx scale deploy/bifrost --replicas=0` (`KUBE_CONTEXT` from `.env`; leave out `--context` if it is empty) stops every call through Bifrost.
+- `kubectl --context <KUBE_CONTEXT> -n bfx scale deploy/bifrost --replicas=0` stops every call through Bifrost.
 - The agent's key is limited to 120 requests a minute and 40,000,000 tokens a day
   (`rl-agent` in `values.yaml`), shared by every run that uses it, and to the one model.
   There is no spend budget.
@@ -172,8 +173,7 @@ TODO: output from the fresh run
 **If clean up is incomplete**, the lines above it say what is left. A graph that did not
 delete in time leaves the namespace, its Secrets and possibly the RDS instance, which keeps
 billing: check it with `kubectl --context <KUBE_CONTEXT> -n bfx get bifrostbackend bifrost -o yaml` and
-`aws rds describe-db-instances --region <AWS_REGION> --db-instance-identifier bfx-bifrost`
-(`AWS_REGION` from `.env`), then run
+`aws rds describe-db-instances --region <AWS_REGION> --db-instance-identifier bfx-bifrost`, then run
 `./bifrost/destroy.sh` again.
 
 It leaves kro and ACK, which come from `bootstrap/`.
