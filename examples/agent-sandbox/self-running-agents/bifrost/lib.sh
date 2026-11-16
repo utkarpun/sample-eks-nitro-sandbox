@@ -1,38 +1,37 @@
 #!/usr/bin/env bash
 # Shared settings for the bifrost/ scripts. Sourced, never run on its own.
-# Every value comes from the environment; kubectl always gets --context when
-# KUBE_CONTEXT is set, so a run never depends on the machine's current context.
-set -euo pipefail
+# It sources the sample's scripts/common.sh, so the bifrost/ scripts read the same
+# .env (CLUSTER_NAME, AWS_REGION, KUBE_CONTEXT, BEDROCK_MODEL_ID) as the agent's,
+# and use its kc_cluster, die, resolve_account, render and AWS read-back.
 
 BF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLUSTER_NAME="${CLUSTER_NAME:-}"
-AWS_REGION="${AWS_REGION:-us-west-2}"; export AWS_REGION
-KUBE_CONTEXT="${KUBE_CONTEXT:-}"
-# Bifrost's own namespace, and the agent namespace whose agent pods may call it.
-BIFROST_NAMESPACE="${BIFROST_NAMESPACE:-self-running-agents-bifrost}"
-AGENT_NAMESPACE="${AGENT_NAMESPACE:-self-running-agents}"
-NAME_PREFIX="${NAME_PREFIX:-self-running-agents}"
-MANAGED_BY="${MANAGED_BY:-self-running-agents}"
+# shellcheck source=../scripts/common.sh
+source "$BF_DIR/../scripts/common.sh"
+
+# Fixed names, inside bootstrap/'s scope (bootstrap/variables.tf): rds_prefix "bfx"
+# (the RDS instance, its subnet group and the bfx-* role), secret_namespaces "bfx"
+# (the rds controller reads the database password Secret only there) and the
+# security group's ManagedBy "bfx". namespace.yaml and instance.yaml carry the same
+# names; change them together with those variables.
+BIFROST_NAMESPACE=bfx
+BF_PREFIX=bfx
+BF_MANAGED_BY=bfx
+# The agent pods' namespace is the sample's own (common.sh NAMESPACE, made by kro/base.yaml).
+AGENT_NAMESPACE="$NAMESPACE"
 CHART_VERSION=2.1.48
 CHART_REPO=https://maximhq.github.io/bifrost/helm-charts
 
-die() { echo "error: $*" >&2; exit 1; }
-[[ -n "$CLUSTER_NAME" ]] || die "set CLUSTER_NAME to your EKS Auto Mode cluster"
-for _n in "$BIFROST_NAMESPACE" "$AGENT_NAMESPACE"; do
-  [[ "$_n" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] || die "namespace must be a DNS label; got '$_n'"
-done
-[[ "$NAME_PREFIX" =~ ^[a-z][-a-z0-9]{0,40}$ ]] \
-  || die "NAME_PREFIX must be lower case letters, digits and dashes, at most 41 characters (RDS and IAM names); got '$NAME_PREFIX'"
-for _c in aws kubectl helm python3 openssl; do
-  command -v "$_c" >/dev/null 2>&1 || die "missing required command: $_c"
-done
+[[ -n "$CLUSTER_NAME" ]] || die "set CLUSTER_NAME (in the sample's .env or your shell) to your EKS Auto Mode cluster"
+require_commands aws "$KUBECTL" helm python3 openssl
 
-kc() { if [[ -n "$KUBE_CONTEXT" ]]; then kubectl --context "$KUBE_CONTEXT" "$@"; else kubectl "$@"; fi; }
+kb() { kc_cluster -n "$BIFROST_NAMESPACE" "$@"; }
+ka() { kc_cluster -n "$AGENT_NAMESPACE" "$@"; }
 hc() { if [[ -n "$KUBE_CONTEXT" ]]; then helm --kube-context "$KUBE_CONTEXT" "$@"; else helm "$@"; fi; }
 
-# The namespace is the sample's only when it carries the sample's label.
+# namespace_is_ours <namespace> <mark>: the namespace carries
+# app.kubernetes.io/managed-by=<mark>. common.sh has no such check at this tip.
 namespace_is_ours() {
   local v
-  v="$(kc get namespace "$1" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null)" || return 2
-  [[ "$v" == "$MANAGED_BY" ]]
+  v="$(kc_cluster get namespace "$1" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null)" || return 2
+  [[ "$v" == "$2" ]]
 }

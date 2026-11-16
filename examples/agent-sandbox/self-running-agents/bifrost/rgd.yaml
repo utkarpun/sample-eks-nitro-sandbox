@@ -15,34 +15,35 @@ spec:
     apiVersion: v1alpha1
     kind: BifrostBackend
     spec:
-      # Names every AWS resource: <prefix>-bifrost.
-      prefix: string | default="self-running-agents"
+      # Names every AWS resource: <prefix>-bifrost. The default is inside
+      # bootstrap/'s rds_prefix, which scopes the ACK role to these names.
+      prefix: string | default="bfx"
       # The ManagedBy tag on every AWS resource made here, so a clean up can
-      # tell this sample's resources from anyone else's.
-      managedBy: string | default="self-running-agents"
+      # tell this sample's resources from anyone else's; one bootstrap/ allows.
+      managedBy: string | default="bfx"
       clusterName: string
       accountID: string
-      region: string | default="us-west-2"
+      region: string
       # The cluster's VPC, its CIDR (who may reach Postgres on 5432) and the
-      # private subnets the database may use, one per AZ at least two AZs.
+      # cluster's subnets, all of them, which the database's subnet group uses.
       vpcID: string
       vpcCIDR: string
       subnetIDs: "[]string"
       # The one inference profile Bifrost may call.
-      modelID: string | default="us.anthropic.claude-sonnet-5-5"
+      modelID: string
       # The model behind that profile, without the geography prefix.
-      foundationModelID: string | default="anthropic.claude-sonnet-5-5"
+      foundationModelID: string
       # The namespace of the agent pods, the only callers allowed in.
       agentNamespace: string
       dbInstanceClass: string | default="db.t4g.micro"
       dbEngineVersion: string | default="17.11"
       dbAllocatedStorage: integer | default=20
       dbBackupRetentionDays: integer | default=1
-      # RDS Multi-AZ keeps a standby in a second AZ, at twice the instance price.
+      # RDS Multi-AZ keeps a standby in a second AZ, which bills the instance and
+      # its storage twice (README, Why the state is in Postgres).
       dbMultiAZ: boolean | default=false
     status:
       dbHost: ${db.status.endpoint.address}
-      roleARN: ${role.status.ackResourceMetadata.arn}
   resources:
     - id: dbSecurityGroup
       template:
@@ -75,7 +76,7 @@ spec:
           name: ${schema.spec.prefix}-bifrost
         spec:
           name: ${schema.spec.prefix}-bifrost
-          description: Bifrost Postgres, the cluster's private subnets
+          description: Bifrost Postgres, the cluster's subnets
           subnetIDs: ${schema.spec.subnetIDs}
           tags:
             - key: ManagedBy
@@ -132,7 +133,10 @@ spec:
     # Bifrost's own role: the one inference profile, and its foundation model in
     # the Regions the profile routes to, only when called through that profile
     # (the Bedrock User Guide's policy for geographic cross-Region inference).
-    # Trusted only from this cluster, namespace and ServiceAccount.
+    # Trusted only from this cluster, namespace and ServiceAccount: one role for
+    # this one workload, through EKS Pod Identity (BPG latest/bpg/security/iam.adoc:1078-1081
+    # "Use one IAM role per application", automode.adoc:92 "Pod Identity is the
+    # recommended approach for IAM permissions in EKS Auto Mode", @edc514fac).
     - id: role
       template:
         apiVersion: iam.services.k8s.aws/v1alpha1
@@ -151,6 +155,8 @@ spec:
             - key: ManagedBy
               value: ${schema.spec.managedBy}
 
+    # Bifrost never calls the Kubernetes API, so no token is mounted (BPG
+    # latest/bpg/security/iam.adoc:1105-1108 @edc514fac).
     - id: serviceAccount
       template:
         apiVersion: v1
@@ -174,8 +180,10 @@ spec:
             ManagedBy: ${schema.spec.managedBy}
 
     # Who may reach Bifrost and where it may connect, enforced by EKS Auto Mode's
-    # network policy. In: agent pods on 8080. Out: DNS, the Pod Identity agent,
-    # Bedrock and Postgres. Pricing is local, so nothing else.
+    # network policy: deny by default, then named allows (BPG
+    # latest/bpg/security/network.adoc:71-76, :100, :134 @edc514fac). In: agent pods on
+    # 8080. Out: DNS, the Pod Identity agent, Bedrock and Postgres. Pricing is
+    # local and the MCP library sync is off (values.yaml), so nothing else.
     - id: networkPolicy
       template:
         apiVersion: networking.k8s.aws/v1alpha1

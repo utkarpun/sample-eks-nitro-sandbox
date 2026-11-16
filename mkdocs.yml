@@ -98,6 +98,7 @@ nav:
       - SandboxTemplate Argo Rollouts: agent-sandbox/argo-rollouts/README.md
       - Brain and hands: agent-sandbox/brain-and-hands/README.md
       - Self-running agents: agent-sandbox/self-running-agents/README.md
+      - Self-running agents, Bifrost: agent-sandbox/self-running-agents/bifrost/README.md
   - Storage:
       - EBS volumes: storage/ebs/README.md
       - Shared EFS storage: storage/efs/README.md
