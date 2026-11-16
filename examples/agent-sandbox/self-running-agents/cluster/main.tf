@@ -6,13 +6,19 @@
 # from this cluster and cannot reach it before it exists:
 #
 #   terraform init
-#   terraform apply -target=module.vpc -target=module.eks   # 1. VPC and cluster
-#   terraform apply                                          # 2. network-policy.tf
+#   terraform apply -target=module.vpc -target=module.eks \
+#     -var 'endpoint_public_access_cidrs=["<your IP>/32"]'   # 1. VPC and cluster
+#   terraform apply -var 'endpoint_public_access_cidrs=["<your IP>/32"]'   # 2. network-policy.tf
 #   aws eks update-kubeconfig --name <cluster_name> --region <region>
 #
 # Then bootstrap/ (Step 0), then the example. Destroy in reverse: the example's
 # clean up, bootstrap/'s destroy, then here one `terraform destroy`, which deletes
-# the ConfigMap before the cluster (network-policy.tf depends_on).
+# the ConfigMap before the cluster (network-policy.tf depends_on). Two things can
+# outlive it: the secrets KMS key (alias eks/<cluster_name>) stays pending deletion
+# for 30 days, and anything Auto Mode made that the example's clean up missed (a load
+# balancer, an EBS volume, a network interface or a security group) blocks the VPC
+# delete. List those with `aws ec2 describe-network-interfaces` and
+# `aws ec2 describe-security-groups`, each filtered on the VPC's vpc-id.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -27,10 +33,10 @@ module "vpc" {
   version = "6.7.3"
 
   name            = var.cluster_name
-  cidr            = var.vpc_cidr
+  cidr            = "10.0.0.0/16"
   azs             = local.azs
-  private_subnets = [for i in range(3) : cidrsubnet(var.vpc_cidr, 4, i)]
-  public_subnets  = [for i in range(3) : cidrsubnet(var.vpc_cidr, 8, 48 + i)]
+  private_subnets = [for i in range(3) : cidrsubnet("10.0.0.0/16", 4, i)]
+  public_subnets  = [for i in range(3) : cidrsubnet("10.0.0.0/16", 8, 48 + i)]
 
   # One NAT gateway for the whole VPC, as eksctl's default makes.
   enable_nat_gateway = true
@@ -43,6 +49,8 @@ module "eks" {
 
   name               = var.cluster_name
   kubernetes_version = var.kubernetes_version
+  # Module defaults kept: a KMS key for secrets (30-day deletion window), and the
+  # audit, api and authenticator logs to CloudWatch, kept 90 days.
 
   # Auto Mode: compute, block storage and load balancing are turned on together
   # from this one block (the module's main.tf), and the module makes the
@@ -55,10 +63,14 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  # Reach the API from the machine that runs kubectl, and give the identity that
-  # runs Terraform cluster admin through an access entry. eksctl does both by
+  # The API endpoint is public but open only to endpoint_public_access_cidrs, which
+  # the reader sets to their own address (EKS Best Practices Guide, security/iam.adoc:
+  # "Leave the cluster endpoint public and specify which CIDR blocks can communicate
+  # with the cluster endpoint"). The identity that runs Terraform gets cluster admin
+  # through an access entry. eksctl makes a public endpoint and that entry by
   # default; the module does neither.
   endpoint_public_access                   = true
+  endpoint_public_access_cidrs             = var.endpoint_public_access_cidrs
   authentication_mode                      = "API"
   enable_cluster_creator_admin_permissions = true
 

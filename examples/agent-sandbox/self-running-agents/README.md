@@ -36,13 +36,18 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 
 ## Prerequisites
 
-- An EKS Auto Mode cluster with Nitro sandboxes, as the
-  [Hello sandbox](../../getting-started/hello-sandbox/README.md) sample creates (see the
-  [prerequisites](../../README.md#prerequisites)), and network policy enforcement on, which
-  the [coding agent blueprint](../../getting-started/coding-agent/README.md)'s step 1 turns on
-  (one ConfigMap, cluster-wide); `setup.sh` checks it and stops if it is off.
-- Terraform 1.5 or later (`bootstrap/versions.tf`; the AWS provider 6.73.0 or later, the
-  first with `aws_eks_capability`).
+- An EKS Auto Mode cluster with Nitro sandboxes and network policy enforcement on, from
+  either path:
+  - **`cluster/`** makes one with Terraform: the VPC, the cluster and the network policy
+    ConfigMap (the commands are below). Enforcement is then already on, so `setup.sh`'s
+    stop for it never fires on this path.
+  - **Your own cluster**, as the [Hello sandbox](../../getting-started/hello-sandbox/README.md)
+    sample creates (see the [prerequisites](../../README.md#prerequisites)), with network
+    policy enforcement turned on as the
+    [coding agent blueprint](../../getting-started/coding-agent/README.md)'s step 1 does (one
+    ConfigMap, cluster-wide); `setup.sh` checks it and stops if it is off.
+- Terraform 1.5.7 or later (`cluster/versions.tf`; `bootstrap/` needs the AWS provider 6.73.0
+  or later, the first with `aws_eks_capability`).
 - Docker with `linux/amd64` builds, the AWS CLI v2 2.32.8 or later (the first with the
   `bedrock-agentcore-control` policy engine commands, which `cleanup.sh`'s read-back uses),
   `kubectl` within one minor version of the cluster, `python3` and `sha256sum` on your path.
@@ -55,6 +60,25 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 - Access to the Bedrock model named in `.env`, and AgentCore Gateway and AgentCore Policy in
   your Region (this run used `us-west-2`).
 - What [Bifrost](bifrost/README.md#before-you-start) needs as well: `helm` 3 and `openssl`.
+
+**Make the cluster with `cluster/`.** Two applies, because the Kubernetes provider is
+configured from the cluster and cannot reach it before it exists (`cluster/main.tf`). The
+cluster's API endpoint is public and open only to `endpoint_public_access_cidrs`: give your
+own address. `cluster_name` and `region` default to `sandbox-demo` and `us-west-2`. Then
+point kubectl at it.
+
+```bash
+cd cluster
+terraform init
+terraform apply -target=module.vpc -target=module.eks -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
+terraform apply -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
+aws eks update-kubeconfig --name sandbox-demo --region us-west-2
+cd ..
+```
+
+```text
+TODO: output from the fresh run
+```
 
 ## Overview
 
@@ -260,7 +284,8 @@ with them the pods need no route to the internet. This sample uses the public en
 | `mcp-proxy-for-aws-cli` | `1.8.0` (Dockerfile; it pins its own dependency tree) |
 | Base image | `public.ecr.aws/docker/library/node:22-bookworm-slim` (tag, not a digest) |
 | Lambda runtime | `python3.13` |
-| Terraform providers | `hashicorp/aws` 6.73.0, `hashicorp/kubernetes` 3.5.0 (`bootstrap/.terraform.lock.hcl`) |
+| Terraform providers | `hashicorp/aws` 6.73.0, `hashicorp/kubernetes` 3.5.0 (`bootstrap/` and `cluster/` lock files) |
+| Terraform modules (`cluster/`) | `terraform-aws-modules/vpc/aws` 6.7.3, `terraform-aws-modules/eks/aws` 21.29.0 |
 | kro and ACK capabilities | EKS managed; this run: `TODO: output from the fresh run` (`terraform output kro_version ack_version`) |
 | EKS | Auto Mode; this run: `TODO: output from the fresh run` |
 | AWS CLI | `TODO: output from the fresh run` for this run |
@@ -270,6 +295,7 @@ with them the pods need no route to the internet. This sample uses the public en
 | File | What it does |
 |---|---|
 | `.env.example` | The local values the scripts read; copy to `.env` |
+| `cluster/*.tf` | The cluster path: the EKS Auto Mode cluster, its VPC and the network policy ConfigMap, applied in two phases (`cluster/main.tf`) |
 | `bootstrap/*.tf` | Step 0: the EKS managed kro and ACK capabilities, their IAM role, and kro's RBAC for the ACK kinds |
 | `kro/base-rgd.yaml`, `kro/base.yaml` | The `SraBase` graph (namespace, run bucket, image repository) and its one instance |
 | `kro/gateway-rgd.yaml`, `kro/gateway.yaml` | The `SraGateway` graph (gateway, Cedar policy, tool, roles, Pod Identity, admission, egress, the agent's ConfigMap) and its one instance |
@@ -487,8 +513,23 @@ terraform destroy -var cluster_name=<CLUSTER_NAME> -var region=us-west-2
 TODO: output from the fresh run
 ```
 
-**What stays.** The runtime classes and network policy enforcement, which this sample only
-reads, and the capabilities until you destroy `bootstrap/`. On your machine: the agent
-image in Docker's local store (`docker image rm <image>`), Terraform's state in `bootstrap/`,
+Last, on the `cluster/` path, remove the cluster, its VPC and the network policy ConfigMap:
+
+```bash
+cd cluster
+terraform destroy -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
+```
+
+```text
+TODO: output from the fresh run
+```
+
+**What stays.** On the `cluster/` path, its `terraform destroy` removes the cluster with its
+runtime classes and network policy enforcement; the cluster's secrets KMS key stays pending
+deletion for 30 days, and `cluster/main.tf` names what can block the VPC delete and how to
+find it. On your own cluster, the runtime classes and network policy enforcement stay, which
+this sample only reads. On either, the capabilities stay until you destroy `bootstrap/`. On
+your machine: the agent image in Docker's local store (`docker image rm <image>`),
+Terraform's state in `bootstrap/` (and `cluster/`),
 and `tmp/self-running-agents/` at the clone's root with test.sh's logs (or `LOG_DIR`). Auto Mode removes the run's node on its
 own.

@@ -16,10 +16,13 @@ variable "kubernetes_version" {
   default     = "1.36"
 }
 
-variable "vpc_cidr" {
-  description = "CIDR of the new VPC. Three private subnets (nodes) and three public subnets (the NAT gateway) are cut from it."
-  type        = string
-  default     = "10.0.0.0/16"
+variable "endpoint_public_access_cidrs" {
+  description = "CIDR blocks that may reach the cluster's public API endpoint, such as your own address as a /32. No default: the module's own opens the endpoint to every address."
+  type        = list(string)
+  validation {
+    condition     = length(var.endpoint_public_access_cidrs) > 0
+    error_message = "Give at least one CIDR block, such as [\"<your IP>/32\"]."
+  }
 }
 
 variable "tags" {
