@@ -7,7 +7,8 @@ Bedrock directly**: until four of the sample's files change, Bifrost runs beside
 nothing routes the agent through it. Those files are `deploy/run-job.yaml` (the agent's
 `CLAUDE_CODE_USE_BEDROCK` and model settings), `agent/settings.json` (an `apiKeyHelper`
 that reads the key), `kro/gateway-rgd.yaml` (the agent role's two Bedrock statements and
-the `bedrock-runtime` name in its egress rule) and `scripts/test.sh` (the egress canary).
+the `bedrock-runtime` name in its egress rule, which also gains an allow for `bfx` on TCP
+8080) and `scripts/test.sh` (the egress canary).
 
 What is code and what is not:
 
@@ -141,8 +142,9 @@ TODO: output from the fresh run
 | NC-B5 | an agent-labelled pod in `sra` | a pod in `sra` without the label; an agent-labelled pod in `bfx` |
 | T-B2 | a new pod with the key's token count kept, 1 replica answering | a key made only in the database (gone), 0 replicas (no answer) |
 
-`test.sh` makes one model call in total. NC-B5's first leg needs the agent's egress rule to
-allow Bifrost, which comes with the agent's switch above.
+`test.sh` makes one model call in total. Until the agent's egress rule (kro/gateway-rgd.yaml
+`egress`) also allows `bfx` on TCP 8080, NC-B5's first leg and T-B2's replica legs fail, and
+T-B2's 0-replica leg proves nothing.
 
 ## How a caller uses it
 
