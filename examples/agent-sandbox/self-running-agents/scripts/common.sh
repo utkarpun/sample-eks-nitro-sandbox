@@ -118,11 +118,18 @@ require_runtime_class() {
   esac
 }
 require_network_policy_enforcement() {
-  local v rc=0 crd=0
+  local v cm=0 rc=0 crd=0
+  local off="It is a cluster-wide setting, so this script does not change it. Turn it on yourself:"
+  resource_exists kc_cluster -n kube-system configmap amazon-vpc-cni || cm=$?
+  case $cm in
+    1) die "network policy enforcement is off on this cluster (there is no amazon-vpc-cni ConfigMap in kube-system). $off
+  kubectl -n kube-system create configmap amazon-vpc-cni --from-literal=enable-network-policy-controller=true" ;;
+    2) die "could not read the amazon-vpc-cni ConfigMap in kube-system, so whether network policy enforcement is on could not be determined" ;;
+  esac
   v="$(kc_cluster -n kube-system get configmap amazon-vpc-cni \
     -o jsonpath='{.data.enable-network-policy-controller}' 2>/dev/null)" || rc=$?
   [[ $rc -ne 0 ]] && die "could not read the amazon-vpc-cni ConfigMap in kube-system, so whether network policy enforcement is on could not be determined"
-  [[ "$v" == "true" ]] || die "network policy enforcement is off on this cluster (enable-network-policy-controller is '${v:-<unset>}'). It is a cluster-wide setting, so this script does not change it. Turn it on yourself:
+  [[ "$v" == "true" ]] || die "network policy enforcement is off on this cluster (enable-network-policy-controller is '${v:-<unset>}'). $off
   kubectl -n kube-system patch configmap amazon-vpc-cni --type merge -p '{\"data\":{\"enable-network-policy-controller\":\"true\"}}'"
   resource_exists kc_cluster crd applicationnetworkpolicies.networking.k8s.aws || crd=$?
   case $crd in
