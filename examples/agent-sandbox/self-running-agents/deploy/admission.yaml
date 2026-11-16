@@ -2,8 +2,9 @@
 # to install). Every pod created in <NAMESPACE> must run in an isolated Nitro
 # sandbox and must not mount a service-account token. The token rule is here
 # because an isolated sandbox does receive the token when automount is on, so
-# turning it off in each pod spec is the only thing that keeps it out, and this
-# makes forgetting it a refused pod instead of a quiet one.
+# turning it off in each pod spec keeps the automatic token out, and this makes
+# forgetting it a refused pod instead of a quiet one; it does not check anything
+# else.
 #
 # Both objects are cluster-scoped, named for the namespace, and match only it.
 apiVersion: admissionregistration.k8s.io/v1

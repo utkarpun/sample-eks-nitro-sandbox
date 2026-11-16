@@ -6,12 +6,14 @@
 # It checks the shared installs and cluster-wide settings it relies on and never
 # changes them. Every AWS resource it creates is tagged ManagedBy=self-running-agents
 # and reused on a re-run only when it carries that tag. Safe to re-run.
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/common.sh" || exit 1
 require_commands aws docker python3 sha256sum "$KUBECTL"
 
 step "0/9 checks"
 show_context
 [[ -n "$CLUSTER_NAME" ]] || die "CLUSTER_NAME is empty; set it in .env"
+aws eks describe-cluster --name "$CLUSTER_NAME" --query cluster.endpoint --output text >/dev/null \
+  || die "could not describe EKS cluster $CLUSTER_NAME in $AWS_REGION; check CLUSTER_NAME and AWS_REGION in .env"
 require_runtime_class
 require_network_policy_enforcement
 resolve_account
@@ -49,8 +51,10 @@ case $rc in
   0) echo "  reusing namespace $NAMESPACE" ;;
   1) die "namespace $NAMESPACE exists and is not labelled $NS_LABEL_KEY=$MANAGED_BY; set NAMESPACE to another value" ;;
   2) die "could not read namespace $NAMESPACE" ;;
-  3) kc_cluster create namespace "$NAMESPACE"
-     kc_cluster label namespace "$NAMESPACE" "$NS_LABEL_KEY=$MANAGED_BY" ;;
+  3) # One manifest, so the namespace never exists without the sample's label.
+     printf 'apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels: { %s: %s }\n' \
+       "$NAMESPACE" "$NS_LABEL_KEY" "$MANAGED_BY" > "$WORK/namespace.yaml"
+     kc_cluster create -f "$WORK/namespace.yaml" ;;
 esac
 render "$SAMPLE_DIR/deploy/admission.yaml" > "$WORK/admission.yaml"
 kc_cluster apply -f "$WORK/admission.yaml"
@@ -61,13 +65,21 @@ case $rc in
   0) [[ "$(aws s3api get-bucket-tagging --bucket "$RUN_BUCKET" --query "TagSet[?Key=='ManagedBy'].Value | [0]" --output text 2>/dev/null)" == "$MANAGED_BY" ]] \
        || die "bucket $RUN_BUCKET exists and is not tagged ManagedBy=$MANAGED_BY; set RUN_BUCKET to another name"
      echo "  reusing bucket $RUN_BUCKET" ;;
-  1) aws s3api create-bucket --bucket "$RUN_BUCKET" --create-bucket-configuration "LocationConstraint=$AWS_REGION" >/dev/null
-     aws s3api put-public-access-block --bucket "$RUN_BUCKET" \
-       --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-     aws s3api put-bucket-tagging --bucket "$RUN_BUCKET" --tagging "TagSet=[{$TAGS_KV}]"
-     echo "  created bucket $RUN_BUCKET (public access blocked, SSE-S3 by default)" ;;
+  1) # The tag goes in the create call, so the bucket never exists untagged. us-east-1
+     # takes no LocationConstraint, so there the tag is a second call.
+     if [[ "$AWS_REGION" == us-east-1 ]]; then
+       aws s3api create-bucket --bucket "$RUN_BUCKET" >/dev/null
+       aws s3api put-bucket-tagging --bucket "$RUN_BUCKET" --tagging "TagSet=[{$TAGS_KV}]"
+     else
+       aws s3api create-bucket --bucket "$RUN_BUCKET" \
+         --create-bucket-configuration "LocationConstraint=$AWS_REGION,Tags=[{$TAGS_KV}]" >/dev/null
+     fi
+     echo "  created bucket $RUN_BUCKET (SSE-S3 by default)" ;;
   2) die "could not read bucket $RUN_BUCKET: $AWS_LAST_ERROR" ;;
 esac
+# Applied on every run, so a bucket an interrupted run created still gets it.
+aws s3api put-public-access-block --bucket "$RUN_BUCKET" \
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 
 step "3/9 agent image"
 rc=0; aws_exists RepositoryNotFoundException -- aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" || rc=$?
@@ -75,7 +87,7 @@ case $rc in
   0) [[ "$(aws ecr list-tags-for-resource --resource-arn "arn:aws:ecr:$AWS_REGION:$ACCOUNT_ID:repository/$ECR_REPOSITORY" --query "tags[?Key=='ManagedBy'].Value | [0]" --output text 2>/dev/null)" == "$MANAGED_BY" ]] \
        || die "ECR repository $ECR_REPOSITORY exists and is not tagged ManagedBy=$MANAGED_BY; set ECR_REPOSITORY to another name" ;;
   1) aws ecr create-repository --repository-name "$ECR_REPOSITORY" --image-scanning-configuration scanOnPush=true \
-       --encryption-configuration encryptionType=AES256 --tags "$TAGS_KV" >/dev/null ;;
+       --tags "$TAGS_KV" >/dev/null ;;
   2) die "could not read ECR repository $ECR_REPOSITORY: $AWS_LAST_ERROR" ;;
 esac
 IMAGE="$(image_uri)"

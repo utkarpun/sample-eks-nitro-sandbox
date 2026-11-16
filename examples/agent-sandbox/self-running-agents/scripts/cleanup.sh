@@ -6,11 +6,12 @@
 # the image repository, the run bucket, the admission policy, and the namespace
 # last. Each AWS delete is read back; a read that fails is "could not determine",
 # never "gone". It never touches a shared install or a cluster-wide setting.
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/common.sh" || exit 1
 set +e
 require_commands aws python3 "$KUBECTL"
 show_context
 resolve_account
+[[ -n "$CLUSTER_NAME" ]] || die "CLUSTER_NAME is empty; set it in .env (the Pod Identity association is on that cluster)"
 FAIL=0
 fail() { echo "  INCOMPLETE: $*" >&2; FAIL=$((FAIL + 1)); }
 
@@ -28,13 +29,21 @@ case $rc in
 esac
 
 step "2/8 Pod Identity association and agent role"
-ASSOC="$(aws eks list-pod-identity-associations --cluster-name "$CLUSTER_NAME" --namespace "$NAMESPACE" \
-  --service-account agent --query 'associations[0].associationId' --output text 2>&1)"
-if [[ $? -ne 0 ]]; then fail "could not list Pod Identity associations: $ASSOC"
-elif [[ "$ASSOC" != "None" && -n "$ASSOC" ]]; then
-  aws eks delete-pod-identity-association --cluster-name "$CLUSTER_NAME" --association-id "$ASSOC" >/dev/null || fail "association $ASSOC"
-  aws_verify_absent "Pod Identity association $ASSOC" ResourceNotFoundException -- \
-    aws eks describe-pod-identity-association --cluster-name "$CLUSTER_NAME" --association-id "$ASSOC"
+if [[ $NS_OURS -eq 1 || $NS_OURS -eq 2 ]]; then fail "namespace $NAMESPACE is not confirmed the sample's; its Pod Identity association was left in place"; else
+  ASSOC="$(aws eks list-pod-identity-associations --cluster-name "$CLUSTER_NAME" --namespace "$NAMESPACE" \
+    --service-account agent --query 'associations[0].associationId' --output text 2>&1)"
+  if [[ $? -ne 0 ]]; then fail "could not list Pod Identity associations: $ASSOC"
+  elif [[ "$ASSOC" != "None" && -n "$ASSOC" ]]; then
+    # Only the association that points at the sample's role, as setup.sh checks.
+    if [[ "$(aws eks describe-pod-identity-association --cluster-name "$CLUSTER_NAME" --association-id "$ASSOC" \
+          --query association.roleArn --output text)" != "$AGENT_ROLE_ARN" ]]; then
+      fail "the Pod Identity association $ASSOC for $NAMESPACE/agent points at another role (or could not be read); left in place"
+    else
+      aws eks delete-pod-identity-association --cluster-name "$CLUSTER_NAME" --association-id "$ASSOC" >/dev/null || fail "association $ASSOC"
+      aws_verify_absent "Pod Identity association $ASSOC" ResourceNotFoundException -- \
+        aws eks describe-pod-identity-association --cluster-name "$CLUSTER_NAME" --association-id "$ASSOC"
+    fi
+  fi
 fi
 
 # delete_role <role>: only a role tagged as the sample's

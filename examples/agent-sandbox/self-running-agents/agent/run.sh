@@ -8,7 +8,6 @@
 #   agent     headless Claude Code with the prompt in /cfg/prompt.txt
 #   tools     list the gateway's tools and call each name in PROBE_CALLS, outside
 #             the model, so a refusal is the gateway's and not the model's choice
-#   internet  try one HTTPS request to a host the egress policy does not allow
 set -uo pipefail
 
 : "${RUN_ID:?}" "${RUN_MODE:?}" "${RUN_BUCKET:?}" "${AWS_REGION:?}"
@@ -18,26 +17,28 @@ say() { echo "sra: $*"; }
 
 say "run=$RUN_ID mode=$RUN_MODE start=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 say "kernel=$(uname -r) uid=$(id -u)"
-for p in /var/run/secrets/kubernetes.io/serviceaccount "$HOME/.aws"; do
+for p in /var/run/secrets/kubernetes.io/serviceaccount /var/run/secrets/pods.eks.amazonaws.com/serviceaccount "$HOME/.aws"; do
   [[ -e $p ]] && say "credential path present: $p" || say "credential path absent: $p"
 done
 
 # Egress gate. A new pod's network policy is not in force the moment the pod
-# starts: on EKS Auto Mode the first request of a fresh agent pod reached
-# example.com, and the same request about 8 s later was refused. So nothing
-# runs until a host the egress rule does not name is refused three times in a
-# row, and the run fails closed if that does not happen within 90 s.
+# starts: on the EKS Auto Mode cluster this was built on, the first request of a
+# fresh agent pod reached example.com, and the same request about 8 s later was
+# refused. So nothing runs until a connection to a host the egress rule does not
+# name fails three times in a row, and the run fails closed if that does not
+# happen within 90 s. Any failure counts (refused, unreachable, timed out or not
+# resolvable), so the canary must be reachable before the rule applies.
 /opt/mcp/bin/python - "${EGRESS_CANARY:-example.com}" <<'PY' || { say "egress gate: the egress rule is not in force; stopping"; exit 3; }
 import socket, sys, time
-host, t0, refused = sys.argv[1], time.time(), 0
+host, t0, failed = sys.argv[1], time.time(), 0
 while time.time() - t0 < 90:
     try:
         socket.create_connection((host, 443), timeout=2).close()
-        refused = 0
+        failed = 0
     except OSError:
-        refused += 1
-        if refused == 3:
-            print(f"sra: egress gate: {host}:443 refused 3 times in a row after {time.time() - t0:.1f} s")
+        failed += 1
+        if failed == 3:
+            print(f"sra: egress gate: {host}:443 failed to connect 3 times in a row after {time.time() - t0:.1f} s")
             sys.exit(0)
     time.sleep(1)
 print(f"sra: egress gate: {host}:443 still reachable after 90 s")
@@ -53,8 +54,8 @@ rc=0
 case "$RUN_MODE" in
   agent)
     say "claude $(claude --version 2>&1)"
-    cd /work
-    claude -p --output-format stream-json --verbose \
+    cd /work || exit 2
+    claude -p --output-format stream-json --verbose --tools "" \
       --setting-sources user --no-session-persistence \
       --strict-mcp-config --mcp-config /cfg/mcp.json \
       --permission-mode dontAsk --max-turns 8 \
@@ -64,18 +65,6 @@ case "$RUN_MODE" in
   tools)
     # shellcheck disable=SC2086 # PROBE_CALLS is a space-separated list of names
     /opt/mcp/bin/python /opt/agent/mcp_call.py /cfg/mcp.json ${PROBE_CALLS:-} | tee "$OUT/tools.json"
-    rc=${PIPESTATUS[0]}
-    ;;
-  internet)
-    /opt/mcp/bin/python - "${PROBE_URL:-https://example.com/}" <<'PY' | tee "$OUT/internet.txt"
-import sys, urllib.request
-url = sys.argv[1]
-try:
-    with urllib.request.urlopen(url, timeout=10) as r:
-        print(f"internet: {url} answered {r.status}")
-except Exception as e:  # any failure to connect is the expected result
-    print(f"internet: {url} refused: {type(e).__name__}: {e}")
-PY
     rc=${PIPESTATUS[0]}
     ;;
   *) say "unknown RUN_MODE $RUN_MODE"; exit 2 ;;

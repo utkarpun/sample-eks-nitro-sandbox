@@ -29,7 +29,9 @@ def handler(event, context):
     # calls the gateway let through.
     print(json.dumps({"tool": tool}))
     if tool == "get_time":
-        tz_name = (event or {}).get("timezone") or "UTC"
+        tz_name = (event if isinstance(event, dict) else {}).get("timezone") or "UTC"
+        if not isinstance(tz_name, str):
+            return {"error": "timezone must be a string"}
         try:
             tz = zoneinfo.ZoneInfo(tz_name)
         except (zoneinfo.ZoneInfoNotFoundError, ValueError):

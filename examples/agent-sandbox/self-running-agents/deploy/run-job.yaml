@@ -13,7 +13,8 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: agent, self-running-agents/run: "<RUN_ID>" }
       annotations:
-        # EKS Auto Mode consolidation otherwise evicts a sandbox pod mid-run.
+        # A run has no retry (backoffLimit 0), so the node is pinned for its duration;
+        # EKS Auto Mode otherwise consolidates it mid-run (auto-cost-control.html).
         karpenter.sh/do-not-disrupt: "true"
     spec:
       runtimeClassName: isolated-sandbox
@@ -35,12 +36,14 @@ spec:
             - { name: RUN_ID, value: "<RUN_ID>" }
             - { name: RUN_MODE, value: "<RUN_MODE>" }
             - { name: PROBE_CALLS, value: "<PROBE_CALLS>" }
-            - { name: PROBE_URL, value: "<PROBE_URL>" }
             - { name: EGRESS_CANARY, value: "<EGRESS_CANARY>" }
             - { name: RUN_BUCKET, value: "<RUN_BUCKET>" }
             - { name: AWS_REGION, value: "<AWS_REGION>" }
+            - { name: AWS_S3_US_EAST_1_REGIONAL_ENDPOINT, value: "regional" }
             - { name: CLAUDE_CODE_USE_BEDROCK, value: "1" }
             - { name: ANTHROPIC_MODEL, value: "<BEDROCK_MODEL_ID>" }
+            # Claude Code's background model uses the same profile, so the role's
+            # one-profile scope holds for it too.
             - { name: ANTHROPIC_DEFAULT_HAIKU_MODEL, value: "<BEDROCK_MODEL_ID>" }
             - { name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, value: "1" }
             - { name: DISABLE_TELEMETRY, value: "1" }

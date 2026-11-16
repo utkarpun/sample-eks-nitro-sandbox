@@ -17,6 +17,7 @@ here with rpcError true.
 
 import asyncio
 import json
+from datetime import timedelta
 import os
 import sys
 
@@ -31,7 +32,7 @@ async def main(cfg_path, names):
     async with aws_iam_streamablehttp_client(
         endpoint, aws_service="bedrock-agentcore", aws_region=os.environ["AWS_REGION"]
     ) as (read, write, _):
-        async with ClientSession(read, write) as session:
+        async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=60)) as session:
             await session.initialize()
             out["listed"] = sorted(t.name for t in (await session.list_tools()).tools)
             for name in names:

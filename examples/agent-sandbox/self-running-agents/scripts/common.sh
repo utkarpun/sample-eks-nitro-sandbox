@@ -40,7 +40,7 @@ if [[ -f "$SAMPLE_DIR/.env" ]]; then
       KUBECTL)          KUBECTL="${KUBECTL:-$_v}" ;;
     esac
   done < <(grep -E "^[[:space:]]*($_ENV_KEYS)[[:space:]]*=" "$SAMPLE_DIR/.env" \
-             | sed -E 's/^[[:space:]]*//; s/[[:space:]]*=[[:space:]]*/=/')
+             | sed -E 's/\r$//; s/^[[:space:]]*//; s/[[:space:]]*=[[:space:]]*/=/')
 fi
 
 CLUSTER_NAME="${CLUSTER_NAME:-}"
@@ -62,6 +62,10 @@ KUBECTL="${KUBECTL:-kubectl}"
   || { echo "error: NAME_PREFIX must be lower-case letters, digits and dashes, 2 to 32 characters, starting with a letter; got '$NAME_PREFIX'" >&2; exit 1; }
 [[ "$BEDROCK_MODEL_ID" =~ ^[A-Za-z0-9._:-]+$ ]] \
   || { echo "error: BEDROCK_MODEL_ID has characters a model id does not have; got '$BEDROCK_MODEL_ID'" >&2; exit 1; }
+[[ "$RUN_BUCKET" =~ ^([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])?$ ]] \
+  || { echo "error: RUN_BUCKET must be an S3 bucket name, or empty; got '$RUN_BUCKET'" >&2; exit 1; }
+[[ "$ECR_REPOSITORY" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]] \
+  || { echo "error: ECR_REPOSITORY must be an ECR repository name; got '$ECR_REPOSITORY'" >&2; exit 1; }
 
 # The AWS names, each derived from NAME_PREFIX so a second copy of the sample in
 # the same account only needs a different prefix.
@@ -71,7 +75,7 @@ TOOL_ROLE="$NAME_PREFIX-tool"
 TOOL_FUNCTION="$NAME_PREFIX-clock"
 GATEWAY_NAME="$NAME_PREFIX-gw"
 POLICY_ENGINE_NAME="${NAME_PREFIX//-/_}_policy"   # policy engine names allow no dashes
-POLICY_NAME="allow_get_time"
+POLICY_NAME="${NAME_PREFIX//-/_}_allow_get_time"
 TOOL_LOG_GROUP="/aws/lambda/$TOOL_FUNCTION"
 
 kc() {
@@ -190,6 +194,7 @@ wait_status() {
     s="$("$@" 2>/dev/null || echo READ_FAILED)"
     case "$s" in
       READY|ACTIVE) echo "  $what is $s"; return 0 ;;
+      READ_FAILED) ;;
       *FAILED*) die "$what reached $s" ;;
     esac
     ((SECONDS >= deadline)) && die "$what is still $s after 300 s"
@@ -233,7 +238,10 @@ aws_verify_absent() {
 # every file under agent/, so a change to either builds a new image and the same
 # content always has the same tag.
 image_tag() {
-  (cd "$SAMPLE_DIR" && find Dockerfile agent -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+  local t
+  t="$(cd "$SAMPLE_DIR" && find Dockerfile agent -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+  [[ "$t" =~ ^[0-9a-f]{16}$ ]] || die "could not hash Dockerfile and agent/ (is sha256sum installed?)"
+  echo "$t"
 }
 image_uri() { echo "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$(image_tag)"; }
 
@@ -243,5 +251,5 @@ render() {
   local f=$1; shift
   sed -e "s|<NAMESPACE>|$NAMESPACE|g" -e "s|<AWS_REGION>|$AWS_REGION|g" \
       -e "s|<RUN_BUCKET>|${RUN_BUCKET:-}|g" -e "s|<BEDROCK_MODEL_ID>|$BEDROCK_MODEL_ID|g" \
-      -e "s|<ACCOUNT_ID>|${ACCOUNT_ID:-}|g" "$@" "$f"
+      -e "s|<ACCOUNT_ID>|${ACCOUNT_ID:-}|g" -e "s|<CLUSTER_NAME>|${CLUSTER_NAME:-}|g" "$@" "$f"
 }

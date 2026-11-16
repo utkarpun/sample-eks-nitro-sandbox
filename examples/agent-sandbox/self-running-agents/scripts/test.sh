@@ -3,24 +3,24 @@
 # refusal for each thing that is meant to refuse. Each check reads PASS or FAIL
 # from the run's own output, and the raw output is kept in LOG_DIR.
 #
-#   T    the agent calls the gateway's get_time tool and reports the time it returned
+#   T    the agent's get_time call was answered without error, and its final answer has the time-in-utc: form with the time the tool returned
 #   T2   outside the model, the gateway lists only get_time for the agent's role and answers it
-#   NC1  a request to a host the egress rule does not name is refused
+#   NC1  in the T run, the egress gate's connections to a host the egress rule does not name failed
 #   NC2  a call to get_host_info, which the Cedar policy does not permit, is refused by the gateway
 #   NC4  the egress gate stops a run when its canary host is reachable
 #   NC3  admission refuses a pod that mounts a service-account token, and accepts one that does not
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/common.sh" || exit 1
 set +e
 LOG_DIR="${LOG_DIR:-$SAMPLE_DIR/../../../tmp/$SAMPLE}"
 mkdir -p "$LOG_DIR"
 PASSES=0; FAILS=0
 verdict() { if [[ $2 -eq 0 ]]; then echo "$1 PASS: $3"; PASSES=$((PASSES+1)); else echo "$1 FAIL: $3"; FAILS=$((FAILS+1)); fi; }
 
-# T: the model chose to call the tool, the tool answered, and the final answer carries what it returned.
+# T: a get_time call was answered without error, and the final answer has the time-in-utc: form with the time it returned.
 "$HERE/run.sh" agent > "$LOG_DIR/T.log" 2>&1; rc=$?
 python3 - "$LOG_DIR/T.log" <<'PY' > "$LOG_DIR/T.check" 2>&1
 import json, sys
-calls, results, final = [], [], ""
+calls, results, final, ids, times, bad = [], [], "", set(), [], False
 for line in open(sys.argv[1]):
     line = line.strip()
     if not line.startswith("{"):
@@ -32,14 +32,24 @@ for line in open(sys.argv[1]):
     for c in (m.get("message") or {}).get("content") or []:
         if isinstance(c, dict) and c.get("type") == "tool_use":
             calls.append(c.get("name"))
+            if (c.get("name") or "").endswith("clock___get_time"):
+                ids.add(c.get("id"))
         if isinstance(c, dict) and c.get("type") == "tool_result":
             results.append(json.dumps(c.get("content"))[:300])
+            if c.get("tool_use_id") in ids:
+                bad = bad or bool(c.get("is_error"))
+                for part in c.get("content") if isinstance(c.get("content"), list) else []:
+                    try:
+                        times.append(json.loads(part.get("text", "")).get("time"))
+                    except (ValueError, AttributeError):
+                        pass
     if m.get("type") == "result":
         final = m.get("result") or ""
+        bad = bad or bool(m.get("is_error"))
 print("tool calls:", calls)
 print("tool results:", results)
 print("final:", final)
-ok = any(n and n.endswith("clock___get_time") for n in calls) and "time-in-utc:" in final and results
+ok = not bad and bool(times) and times[-1] is not None and f"time-in-utc: {times[-1]}" in final
 sys.exit(0 if ok else 1)
 PY
 c=$?; [[ $rc -ne 0 ]] && c=1
@@ -52,24 +62,23 @@ import json, re, sys
 text, target = open(sys.argv[1]).read(), sys.argv[2]
 m = re.search(r'^\{$.*?^\}$', text, re.S | re.M)
 doc = json.loads(m.group(0)) if m else {"listed": [], "calls": []}
-calls = {c["tool"].split("___")[-1]: c for c in doc["calls"]}
+calls = {c["tool"].split("___")[-1]: c for c in doc.get("calls", [])}
 t = calls.get("get_time", {}); d = calls.get("get_host_info", {})
-listed_only = [n for n in doc["listed"] if n.startswith(target + "___")] == [target + "___get_time"]
+listed_only = [n for n in doc.get("listed", []) if n.startswith(target + "___")] == [target + "___get_time"]
 t2 = listed_only and bool(t) and not t["isError"] and '"time"' in t["text"]
 nc2 = bool(d) and d["isError"] and "Tool Execution Denied" in d["text"] and "policy enforcement" in d["text"]
-print(f"T2 {int(not t2)} listed={doc['listed']} get_time={t.get('text','')[:160]}")
+print(f"T2 {int(not t2)} listed={doc.get('listed', [])} get_time={t.get('text','')[:160]}")
 print(f"NC2 {int(not nc2)} get_host_info isError={d.get('isError')} text={d.get('text','')[:200]}")
 PY
 while read -r name code rest; do verdict "$name" "$code" "$rest"; done < <(grep -E '^(T2|NC2) ' "$LOG_DIR/tools.check")
 grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run's output: $(tail -3 "$LOG_DIR/tools.log" | tr '\n' ' ')"
 
-# NC1: a host the egress rule does not name.
-"$HERE/run.sh" internet https://example.com/ > "$LOG_DIR/NC1.log" 2>&1
-line="$(grep -E '^internet: ' "$LOG_DIR/NC1.log")"
-[[ "$line" == *" refused: "* ]]; verdict NC1 $? "${line:-no result line}"
+# NC1: a host the egress rule does not name, read from the T run's egress gate line.
+line="$(grep -E '^sra: egress gate: example.com:443 failed to connect 3 times' "$LOG_DIR/T.log")"
+verdict NC1 $? "${line:-no gate line in T.log}"
 
 # NC4: the egress gate fails closed. Pointed at a host the rule does allow, it
-# never sees a refusal, so the run must stop before the tool call it was given.
+# never sees a connection fail, so the run must stop before the tool call it was given.
 EGRESS_CANARY="bedrock-runtime.$AWS_REGION.amazonaws.com" "$HERE/run.sh" tools "${TARGET}___get_time" > "$LOG_DIR/NC4.log" 2>&1; nrc=$?
 line="$(grep -E '^sra: egress gate: ' "$LOG_DIR/NC4.log" | tr '\n' ' ')"
 [[ $nrc -ne 0 ]] && grep -q 'still reachable' "$LOG_DIR/NC4.log" && ! grep -q '"listed"' "$LOG_DIR/NC4.log"

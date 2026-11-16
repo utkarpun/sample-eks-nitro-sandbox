@@ -1,6 +1,7 @@
 # Where an agent pod may connect, enforced by EKS Auto Mode's network policy.
 # Selecting the pods isolates them: anything not listed is refused, ingress
-# included. Name rules match the addresses the names resolve to, not the name
+# included, except the sandbox's own metadata service at 169.254.169.254, which
+# runs inside the sandbox where this rule does not reach. Name rules match the addresses the names resolve to, not the name
 # the client sends inside TLS, and Auto Mode learns them per node, so read this
 # as "these names and anything sharing their addresses on this node".
 apiVersion: networking.k8s.aws/v1alpha1

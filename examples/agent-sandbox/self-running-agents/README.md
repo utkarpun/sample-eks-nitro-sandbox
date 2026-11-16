@@ -4,22 +4,38 @@ This blueprint runs an agent the way a self-running repository agent would: one 
 Claude Code run per job, in an isolated Nitro sandbox, started for the job and gone after
 it, with everything it produced copied out of the pod before it exits. The agent holds no
 tool of its own. Its only tools come through an Amazon Bedrock AgentCore Gateway, which
-asks a Cedar policy engine about every call, so what the agent may do is decided outside
-the sandbox by a policy you can read, not by the agent's own settings.
+asks a Cedar policy engine about every call. Every tool call that leaves the pod is decided
+outside the sandbox by a policy you can read. What the agent can do inside the pod is
+decided by its own Claude Code configuration (`agent/settings.json` and the flags in
+`agent/run.sh`): the built-in tools are off (`--tools ""`) and settings.json allows only
+the gateway. The mode is a field on the gateway; whoever holds
+`bedrock-agentcore:UpdateGateway` can set it to `LOG_ONLY` or remove the engine, so that
+permission is the real control. The agent's role has no such permission.
 
 This is phase A of the blueprint: the tool door. The agent calls Amazon Bedrock directly
-for its model, with one inference profile. A later phase puts an in-cluster model gateway
-in front of Bedrock.
+for its model, with one inference profile. A later phase puts Bifrost, an in-cluster model
+gateway, in front of Bedrock.
 
-It needs an EKS Auto Mode cluster with Nitro sandboxes and network policy enforcement on,
-as the [prerequisites](../../README.md#prerequisites) and the
-[Hello sandbox](../../getting-started/hello-sandbox/README.md) sample set up. Beyond that it
+It needs an EKS Auto Mode cluster with Nitro sandboxes, as the
+[Hello sandbox](../../getting-started/hello-sandbox/README.md) sample creates (see the
+[prerequisites](../../README.md#prerequisites)), and network policy enforcement on, which
+the [coding agent blueprint](../../getting-started/coding-agent/README.md)'s step 1 turns on
+(one ConfigMap, cluster-wide); `setup.sh` checks it and stops if it is off. Beyond that it
 needs Docker with `linux/amd64` builds, the AWS CLI v2 with the `bedrock-agentcore-control`
-commands (2.35 or later was used), access to the Bedrock model named in `.env`, and AgentCore
-Gateway and AgentCore Policy in your Region (this run used `us-west-2`).
+commands (this run used 2.35.11), `kubectl`, `python3` and `sha256sum` on your path, and
+credentials that may create IAM roles and inline policies, Lambda functions, AgentCore
+gateways and policy engines (with `bedrock-agentcore:InvokeGateway`, which creating a Cedar
+policy needs), an S3 bucket, an ECR repository and an EKS Pod Identity association. It also
+needs access to the Bedrock model named in `.env`, and AgentCore Gateway and AgentCore
+Policy in your Region (this run used `us-west-2`).
+
+Beyond the cluster, a run costs the Bedrock tokens the agent spends, the gateway's tool
+calls, one Lambda invocation per tool call, and the node EKS Auto Mode launches for the
+sandbox pod (1 vCPU, 2Gi), which EKS Auto Mode removes once it is empty. Between runs you
+pay for the image in ECR and the objects in the run bucket; `cleanup.sh` removes both.
 
 ```bash
-git clone https://github.com/aws-samples/sample-eks-nitro-sandbox.git
+git clone -b self-running-agents https://github.com/utkarpun/sample-eks-nitro-sandbox.git
 cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 ```
 
@@ -53,7 +69,10 @@ role may invoke the one inference profile and the foundation models it routes to
 `bedrock-agentcore:InvokeGateway` on the one gateway, and put objects under `runs/` in the
 run bucket. It holds nothing else. This follows the EKS Best Practices Guide's "Use one IAM
 role per application" (`latest/bpg/security/iam.adoc:1078-1084` at
-`aws/aws-eks-best-practices` `edc514fac86518b50129401c0cffd1f7981d7ec5`).
+`aws/aws-eks-best-practices` `edc514fac86518b50129401c0cffd1f7981d7ec5`). The role trusts
+only Pod Identity sessions tagged with this cluster, this namespace and the `agent`
+ServiceAccount (`iam.adoc:940-947`, same commit). A role that already exists is not
+re-trusted: `setup.sh` reuses it with the trust it has.
 
 **The tool door.** The gateway authenticates the caller by its SigV4 signature, so the
 Cedar principal is the pod's role:
@@ -61,12 +80,19 @@ Cedar principal is the pod's role:
 The one policy, `policy/allow-get-time.cedar`, permits that principal to call
 `clock___get_time` on that gateway. Cedar is default-deny, so `get_host_info` is refused
 for the agent, and every tool is refused for any other caller. The gateway's own role may
-invoke only the tool function and ask only its own policy engine for decisions.
+invoke only the tool function and ask only its own policy engine for decisions. Its trust
+lets any AgentCore gateway in the account assume it (`gateway/*`), because the gateway's
+ARN is known only after the gateway exists.
 
-**No Kubernetes token.** The pod spec sets `automountServiceAccountToken: false`, as the
+**No Kubernetes API token.** The pod spec sets `automountServiceAccountToken: false`, as the
 EKS Best Practices Guide's "Disable auto-mounting of service account tokens" says
-(`latest/bpg/security/iam.adoc:1104-1108`, same commit). An isolated Nitro sandbox does get
-the token when automount is on, so that setting is the only thing keeping it out. A
+(`latest/bpg/security/iam.adoc:1104-1108`, same commit). The only token in the pod is the
+one EKS Pod Identity projects for its node agent
+(`/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token`, audience
+`pods.eks.amazonaws.com`); it is what the agent exchanges for the role's AWS credentials,
+and the Kubernetes API does not accept it. An isolated Nitro sandbox does get the token
+when automount is on, so that setting keeps the automatic token out; a pod that mounts a
+token on purpose, as a projected volume, still gets one. A
 `ValidatingAdmissionPolicy` (`deploy/admission.yaml`), built into Kubernetes, refuses any
 pod in the namespace that does not turn it off or does not run in `isolated-sandbox`.
 
@@ -75,20 +101,34 @@ which isolates them, and allows DNS, the Pod Identity agent at `169.254.170.23:8
 TCP 443 to three names only: `bedrock-runtime.<Region>.amazonaws.com`, the gateway's host,
 and the run bucket's host. This is the EKS Best Practices Guide's default-deny start
 (`latest/bpg/security/network.adoc:71-76`, same commit), with the allows layered on.
+The run is a plain Job with the `isolated-sandbox` runtime class, not an agent-sandbox
+`SandboxTemplate`, so no controller adds a network policy of its own. Network policies add
+up: on a template, the controller's default policy would open what this rule closes, so
+either set `networkPolicyManagement: Unmanaged` (as the ide sample does) or carry these
+egress rules in the template's own `networkPolicy`. The price of a plain Job is cold start.
 
-**The egress gate.** A new pod's network policy is not in force the moment the pod
-starts. On this cluster the first request of a fresh agent pod reached `example.com` and
-was answered `200`; the same request about 8 s later was refused (raw lines under
-[Step 5](#step-5)). So `agent/run.sh` starts nothing until a host the rule does not name
-(`example.com`, or `EGRESS_CANARY`) is refused three times in a row, and fails the run if
-that has not happened after 90 s.
+**The egress gate.** With the NodeClass's default `networkPolicy: DefaultAllow`, a new
+pod's network policy is not in force the moment the pod starts. On this cluster the first
+request of a fresh agent pod reached `example.com` and was answered `200`; the same request
+about 8 s later was refused (raw lines under [Step 5](#step-5)). So `agent/run.sh` starts
+nothing until a connection to a host the rule does not name (`example.com`, or
+`EGRESS_CANARY`) fails three times in a row, and fails the run if that has not happened
+after 90 s. Any failure to connect counts (refused, unreachable, timed out or not
+resolvable), so the gate only means something when the canary is reachable before the rule
+applies: on a cluster with no internet path, set `EGRESS_CANARY` to a host the pod can
+otherwise reach.
 
 **State outside the pod.** The pod's filesystem is read-only apart from three `emptyDir`
 volumes. The run's output goes to standard output, which `run.sh` streams as it happens
-(EKS Auto Mode can remove the node as soon as a Job's pod finishes, and its logs with it),
-and to `s3://<run bucket>/runs/<run id>/` before the pod exits.
+(on this cluster EKS Auto Mode removed a node after a Job's pod finished and its logs went
+with it, step 1 E16), and to `s3://<run bucket>/runs/<run id>/` before the pod exits. A run
+may overwrite earlier runs' objects; turn on bucket versioning if the record matters. The
+pod carries `karpenter.sh/do-not-disrupt`, because Auto Mode consolidation otherwise evicts
+a sandbox pod mid-run.
 
-**AWS resources it creates**, each tagged `ManagedBy=self-running-agents` and each named
+**AWS resources it creates**, each tagged `ManagedBy=self-running-agents` (the target and
+the Cedar policy carry no tags of their own; they belong to the tagged gateway and engine)
+and each named
 from `NAME_PREFIX`: three IAM roles (`-agent`, `-gateway`, `-tool`), the Lambda function
 `-clock` and its log group (one-day retention), the policy engine `<prefix>_policy` and its
 one policy, the gateway `-gw` and its target `clock`, the run bucket, the ECR repository,
@@ -105,25 +145,71 @@ namespace last, only when everything before it is gone.
 
 ### What this blueprint does not limit
 
+This list is not complete. Today the agent cannot use any of these, because it has no tool
+that runs code or opens a connection; a repository agent that is given Bash, file tools or
+a credential can use every one of them, so close them before you add such a tool.
+
 **Name rules match addresses.** The egress rule's names are resolved to addresses and the
-rule matches the addresses, not the name a client sends inside TLS. A host that shares an
-address with an allowed name is reachable too. EKS Auto Mode also learns the addresses per
-node, not per pod, so a pod can reach a name another pod on the same node is allowed.
+rule matches the addresses (the EKS guide: resolved IPs go into an eBPF map and egress is
+filtered by IP), not the name a client sends inside TLS. A host that shares an address with
+an allowed name is reachable too. On this cluster the learned addresses were shared by
+every pod on the node (step 1, E08), so a pod can reach a name another pod on the same node
+is allowed. The run bucket's name is the clearest case: every S3 bucket in the Region is
+served from the same addresses, so the rule lets the pod reach any bucket. The role can
+write only under `runs/` in the run bucket, but public buckets are readable and writable
+without a role.
 
-**DNS is open.** Port 53 is allowed to any address, and the node answers every query, so
-DNS can carry data out of the pod.
+**DNS is open.** Port 53 is allowed to any address. EKS documents a DNS filter for name
+rules, but on this cluster every name still resolved from an agent pod (step 1, E09), so
+treat DNS as a channel that can carry data out.
 
-**The window before the policy.** The egress gate keeps the agent from starting during it,
-but the window exists for every pod in the namespace. The cluster-wide way to close it is
-the NodeClass's `networkPolicy: DefaultDeny` (the field the EKS Best Practices Guide shows
-at `latest/bpg/security/automode.adoc:162-172`, same commit). That is a cluster-wide
-setting, so this sample does not change it.
+**The window before the policy.** The egress gate keeps the agent from starting during it
+on a cluster where the canary is reachable, but the window exists for every pod in the
+namespace. The NodeClass-wide (on the built-in NodePools, every node) way to close it is the
+NodeClass's `networkPolicy: DefaultDeny` (the field the EKS Best Practices Guide shows, with
+`DefaultAllow`, at `latest/bpg/security/automode.adoc:162-172`; the two values are listed in
+the EKS NodeClass specification, and the VPC CNI documents the same deny-until-configured
+behavior as strict mode). Not exercised by this sample.
 
-**The model call.** The agent reaches Bedrock directly with its own role. Nothing outside
-the pod sees or meters those calls in this phase.
+**The model call.** The agent reaches Bedrock directly with its own role. Nothing in this
+blueprint sits between the agent and Bedrock in this phase: no per-run budget and no
+inspection of prompts or tool results. Bedrock still records the calls on its side:
+CloudTrail logs each `InvokeModel` call as a management event, CloudWatch counts
+invocations and tokens per model (`AWS/Bedrock`), and model invocation logging, if you turn
+it on, keeps the request and response bodies.
 
-**Isolated sandboxes do not enforce Cedar or image signing.** The Cedar policy here is the
-gateway's, in AWS. It says nothing about what runs inside the pod.
+**No in-guest policy.** An isolated sandbox runs no in-guest policy unless one is supplied;
+AWS documents in-guest Cedar for both modes, our step 1 test covered confidential mode only,
+and this sample supplies none. Image signing (AWS Signer) was tested only in confidential
+mode. The Cedar policy here is the gateway's, in AWS. It says nothing about what runs
+inside the pod.
+
+**Admission checks two fields.** The policy refuses a pod that leaves the token automount
+on or runs outside `isolated-sandbox`. It does not refuse a privileged container, a
+`hostPath` volume, `hostNetwork`, a Secret in `env` or a token mounted on purpose as a
+projected volume, and an isolated sandbox does not refuse the first three either (our step 1
+run). Add those rules, or a policy engine, before anyone but you creates pods in the
+namespace.
+
+**Only labelled pods are under the egress rule.** The rule selects
+`app.kubernetes.io/name: agent`. Admission does not require that label or the `agent`
+ServiceAccount, so a pod created in the namespace without the label but with
+`serviceAccountName: agent` gets the agent's AWS credentials and the cluster's default
+egress (`DefaultAllow` here). Keep `create pods` in the namespace to yourself.
+
+**Instance metadata.** An isolated sandbox runs its own IMDSv2 metadata service at
+`169.254.169.254`, inside the sandbox, so the egress rule does not reach it. It serves only
+the Region, Availability Zone and partition, and 404 for everything else, credentials
+included ([Pod Identity and credentials](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-metadata-credentials.html)).
+A sandbox Cedar policy generated with `--deny-imds` turns it off.
+
+**The role works without the gateway.** The pod's AWS credentials reach Bedrock and the run
+bucket directly; only tool calls pass the gateway's policy. No remedy in this sample beyond
+the role's narrow scope.
+
+**Every allowed name is a public endpoint.** AgentCore Gateway, Bedrock and S3 each have
+interface VPC endpoints (the gateway's is `com.amazonaws.<Region>.bedrock-agentcore.gateway`);
+with them the pods need no route to the internet. This sample uses the public endpoints.
 
 ## Versions
 
@@ -131,9 +217,9 @@ gateway's, in AWS. It says nothing about what runs inside the pod.
 |---|---|
 | Claude Code | `2.1.310` (Dockerfile) |
 | `mcp-proxy-for-aws-cli` | `1.8.0` (Dockerfile; it pins its own dependency tree) |
-| Base image | `public.ecr.aws/docker/library/node:22-bookworm-slim` |
+| Base image | `public.ecr.aws/docker/library/node:22-bookworm-slim` (tag, not a digest; this run resolved `sha256:e9f565d3...`) |
 | Lambda runtime | `python3.13` |
-| EKS | 1.36, Auto Mode (this run: 1.36.5) |
+| EKS | 1.36, Auto Mode (this run: Kubernetes v1.36.5, platform eks.19) |
 | AWS CLI | 2.35.11 for this run |
 
 ## Files
@@ -142,8 +228,8 @@ gateway's, in AWS. It says nothing about what runs inside the pod.
 |---|---|
 | `.env.example` | The local values the scripts read; copy to `.env` |
 | `Dockerfile`, `.dockerignore` | The agent image: Claude Code, the bridge, and `agent/` |
-| `agent/run.sh` | Runs in the pod: egress gate, then the agent, a tool listing or an internet probe, then stores the output |
-| `agent/settings.json` | Denies every built-in tool and allows only `mcp__gateway` |
+| `agent/run.sh` | Runs in the pod: egress gate, then the agent or a tool listing, then stores the output |
+| `agent/settings.json` | Built-in tools are off (`--tools ""` in agent/run.sh); settings.json allows only `mcp__gateway` |
 | `agent/claude.json` | Marks `/work` trusted so a headless run does not stop at the trust prompt |
 | `agent/prompt.txt` | The run's prompt |
 | `agent/mcp_call.py` | Lists and calls the gateway's tools with no model in the loop |
@@ -163,7 +249,8 @@ sample's resources. That run set `NAMESPACE=sra`, `NAME_PREFIX=sra` and
 `ECR_REPOSITORY=sra-agent`, so those names appear below; the defaults are
 `self-running-agents`. The account id is replaced with `<ACCOUNT_ID>`, the cluster name
 with `<CLUSTER_NAME>`, and the generated ids of the gateway, the policy engine and the Pod
-Identity association with `<id>`; long blocks are abridged where marked.
+Identity association with `<id>`; long blocks are abridged where marked. The `sra:` prefix
+on the pod's own lines is fixed in `agent/run.sh`.
 
 **Step 1: copy the settings and fill them in.**
 
@@ -172,8 +259,13 @@ cp .env.example .env
 # set CLUSTER_NAME, and KUBE_CONTEXT to pin the cluster
 ```
 
+`KUBE_CONTEXT` must be the context of `CLUSTER_NAME`: the Pod Identity association is made
+on `CLUSTER_NAME`, the pods run on the context, and a mismatch is a run with no credentials.
+
 **Step 2: set everything up.** `setup.sh` checks the runtime class and network policy
-enforcement and changes neither.
+enforcement and changes neither. If it stops part way, run it again: it reuses what it
+already created (each piece is tagged `ManagedBy=self-running-agents`) and refuses a
+same-named resource that is not the sample's.
 
 ```bash
 ./scripts/setup.sh
@@ -181,12 +273,12 @@ enforcement and changes neither.
 
 ```text
 == 0/9 checks ==
+context: <KUBE_CONTEXT> (current; set KUBE_CONTEXT in .env to pin it)   namespace: sra   region: us-west-2
 network policy enforcement is on, and ApplicationNetworkPolicy is available
 account: <ACCOUNT_ID>   cluster: <CLUSTER_NAME>   run bucket: sra-runs-<ACCOUNT_ID>-us-west-2
 
 == 1/9 namespace sra ==
 namespace/sra created
-namespace/sra labeled
 validatingadmissionpolicy.admissionregistration.k8s.io/self-running-agents-sra created
 validatingadmissionpolicybinding.admissionregistration.k8s.io/self-running-agents-sra created
 ...
@@ -200,7 +292,7 @@ arn:aws:iam::<ACCOUNT_ID>:role/sra-gateway
 
 == 7/9 tool target clock and the Cedar policy ==
   target clock is READY
-  policy allow_get_time is ACTIVE
+  policy sra_allow_get_time is ACTIVE
 ...
 == 9/9 the agent's ServiceAccount, egress rule and configuration ==
 serviceaccount/agent created
@@ -208,49 +300,54 @@ applicationnetworkpolicy.networking.k8s.aws/agent-egress created
 configmap/agent-config created
 ```
 
-(Abridged: the image build and push and steps 2 to 4 and 8 are left out.)
+(Abridged: the image build and push and steps 2 to 4 and 8 are left out. With
+`KUBE_CONTEXT` set, the first line reads `(pinned)` instead.)
 
-**Step 3: start one agent run.** The agent reads the time through the gateway and reports
-it. The pod has no service-account token, and waits for its egress rule before it starts.
+**Step 3: start one agent run.** (The output below is from the agent run `test.sh` starts
+as its first check, T, in Step 4; `run.sh` prints the same.) The agent reads the time
+through the gateway and reports it. The pod has no Kubernetes API token, and waits for its
+egress rule before it starts.
 
 ```bash
 ./scripts/run.sh
 ```
 
 ```text
-run 20261116t102831z-7dda73: mode agent, job agent-agent-20261116t102831z-7dda73
-sra: run=20261116t102831z-7dda73 mode=agent start=2026-11-16T10:28:36Z
+run 20261116t120458z-5be0c2: mode agent, job agent-agent-20261116t120458z-5be0c2
+sra: run=20261116t120458z-5be0c2 mode=agent start=2026-11-16T12:05:22Z
 sra: kernel=6.18.62 uid=1000
 sra: credential path absent: /var/run/secrets/kubernetes.io/serviceaccount
+sra: credential path present: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount
 sra: credential path absent: /home/node/.aws
-sra: egress gate: example.com:443 refused 3 times in a row after 15.1 s
+sra: egress gate: example.com:443 failed to connect 3 times in a row after 15.0 s
 sra: claude 2.1.310 (Claude Code)
 ...
 sra: rc=0
-sra: stored s3://sra-runs-<ACCOUNT_ID>-us-west-2/runs/20261116t102831z-7dda73/stream.jsonl
-run 20261116t102831z-7dda73: job succeeded=1 failed=
+sra: stored s3://sra-runs-<ACCOUNT_ID>-us-west-2/runs/20261116t120458z-5be0c2/stream.jsonl
+run 20261116t120458z-5be0c2: job succeeded=1 failed=
 ```
 
 (Abridged: the stream-json lines are left out.) The tool calls and the result, read from
 that run's stream:
 
 ```text
-tool_use: ToolSearch {"query": "select:mcp__gateway__clock___get_time", "max_results": 1}
+{"type":"system","subtype":"init","cwd":"/work",...,"tools":["mcp__gateway__clock___get_time"],...}
 tool_use: mcp__gateway__clock___get_time {"timezone": "UTC"}
-result: time-in-utc: 2026-11-16T10:29:06+00:00 | turns 3 | is_error False
+result: time-in-utc: 2026-11-16T12:05:51+00:00 | turns 2 | is_error False
 ```
 
-**Step 4: check it both ways.** `test.sh` runs the agent once more, then each refusal.
+**Step 4: check it both ways.** `test.sh` runs the agent once (the run shown in Step 3),
+then each refusal.
 
 ```bash
 ./scripts/test.sh
 ```
 
 ```text
-T PASS: tool calls: ['ToolSearch', 'mcp__gateway__clock___get_time'] ... final: time-in-utc: 2026-11-16T10:29:06+00:00
-T2 PASS: listed=['clock___get_time'] get_time={"timezone":"UTC","time":"2026-11-16T10:29:39+00:00"}
+T PASS: tool calls: ['mcp__gateway__clock___get_time'] ... final: time-in-utc: 2026-11-16T12:05:51+00:00
+T2 PASS: listed=['clock___get_time'] get_time={"timezone":"UTC","time":"2026-11-16T12:06:26+00:00"}
 NC2 PASS: get_host_info isError=True text=Tool Execution Denied: Tool call not allowed due to policy enforcement [No policy applies to the request (denied by default).]
-NC1 PASS: internet: https://example.com/ refused: URLError: <urlopen error [Errno 101] Network is unreachable>
+NC1 PASS: sra: egress gate: example.com:443 failed to connect 3 times in a row after 15.0 s
 NC4 PASS: sra: egress gate: bedrock-runtime.us-west-2.amazonaws.com:443 still reachable after 90 s sra: egress gate: the egress rule is not in force; stopping  run rc=1
 NC3 PASS: token on: The pods "admission-check" is invalid: : ValidatingAdmissionPolicy 'self-running-agents-sra' with binding 'self-running-agents-sra' denied request: pods in this namespace must set ... | token off: pod/admission-check created (server dry run)
 
@@ -258,6 +355,10 @@ checks: 6 PASS, 0 FAIL
 ```
 
 (Abridged: the T line's tool results and the NC3 message are cut where marked.)
+
+Not covered by these checks: callers other than the agent role, hosts other than
+example.com, a pod without the agent label, a pod without
+`runtimeClassName: isolated-sandbox`, and the Pod Identity token, which the pod does hold.
 
 - **T2 and NC2** call the gateway directly as the pod's role, with no model in the loop
   (`agent/mcp_call.py`), so the refusal is the gateway's, not the model's choice and not
@@ -268,8 +369,8 @@ checks: 6 PASS, 0 FAIL
         2 {"tool": "get_time"}
   ```
 
-- **NC4** proves the egress gate fails closed: pointed at a host the rule does allow, it
-  never sees a refusal, and the run stops before its tool call.
+- **NC4** shows the gate stops a run when its canary answers: pointed at a host the rule
+  does allow, the run stops before its tool call.
 
 <a id="step-5"></a>
 **Step 5: the window the egress gate is for.** This block is from a separate run of the
@@ -296,6 +397,31 @@ from the moment the pod starts:
   created a moment before. `setup.sh` retries those two creates.
 - **The run's logs.** Read a past run from the bucket:
   `aws s3 cp s3://<run bucket>/runs/<run id>/stream.jsonl -`.
+- **Limits.** A run is stopped at 15 minutes (`activeDeadlineSeconds`), is not retried, and
+  the model gets at most 8 turns; change them in `deploy/run-job.yaml` and `agent/run.sh`.
+- **A failed run.** `run.sh` prints the Job's verdict and deletes the Job, so read the
+  streamed output or `runs/<run id>/` in the bucket; a pod exit of 3 means the egress gate
+  failed. A Job with no verdict 60 s after its logs end, or whose pod does not start within
+  10 minutes, is left for `cleanup.sh`.
+- **Where a refusal is recorded.** The gateway's own logs do not carry policy decisions; the
+  `DenyDecisions` metric in `AWS/Bedrock-AgentCore` (dimension `ToolName`) does, by default:
+  `aws cloudwatch get-metric-statistics --namespace AWS/Bedrock-AgentCore --metric-name DenyDecisions ...`.
+  Per-call decisions need traces enabled on the gateway, which this sample does not do.
+- **Quotas.** AgentCore Gateway and Policy have their own quotas: see
+  [Quotas for Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/bedrock-agentcore-limits.html).
+- **Why the AWS CLI.** AWS's own getting-started path is the AgentCore CLI
+  (`agentcore add policy-engine`, `agentcore add policy`) or the starter toolkit; this
+  sample uses the AWS CLI so it reads like this repository's other blueprints.
+
+## Extending it
+
+This is a base to build on, and it has three seams for your own pieces: your own prompt
+(`agent/prompt.txt`, which `setup.sh` puts in the run's ConfigMap), a repository checkout
+for the agent to work in (a step in `agent/run.sh` before Claude Code starts, with the
+repository's host added to `deploy/egress.yaml`), and more tools as extra gateway targets,
+each with its own Cedar `permit` for the agent's role. Read
+[What this blueprint does not limit](#what-this-blueprint-does-not-limit) before you give
+the agent a tool that runs code or opens a connection.
 
 ## Clean up
 
@@ -306,9 +432,9 @@ from the moment the pod starts:
 ```text
 == 1/8 the runs and the namespace's objects ==
 No resources found
-configmap "agent-config" deleted from sra namespace
-applicationnetworkpolicy.networking.k8s.aws "agent-egress" deleted from sra namespace
-serviceaccount "agent" deleted from sra namespace
+configmap "agent-config" deleted
+applicationnetworkpolicy.networking.k8s.aws "agent-egress" deleted
+serviceaccount "agent" deleted
 
 == 2/8 Pod Identity association and agent role ==
   Pod Identity association a-<id> is gone
@@ -331,18 +457,21 @@ serviceaccount "agent" deleted from sra namespace
   bucket sra-runs-<ACCOUNT_ID>-us-west-2 is gone
 
 == 7/8 admission policy ==
-Warning: deleting cluster-scoped resources, not scoped to the provided namespace
 validatingadmissionpolicybinding.admissionregistration.k8s.io "self-running-agents-sra" deleted
-Warning: deleting cluster-scoped resources, not scoped to the provided namespace
 validatingadmissionpolicy.admissionregistration.k8s.io "self-running-agents-sra" deleted
 
 == 8/8 namespace sra ==
-Warning: deleting cluster-scoped resources, not scoped to the provided namespace
 namespace "sra" deleted
   namespace sra is gone
 
 clean up complete
 ```
 
-**What stays.** The runtime classes, the agent-sandbox install and network policy
-enforcement, which this sample only reads.
+(Abridged: kubectl's client-specific `from sra namespace` suffixes and its
+`Warning: deleting cluster-scoped resources` lines, which depend on your kubectl version,
+are left out.)
+
+**What stays.** The runtime classes and network policy enforcement, which this sample only
+reads. On your machine: the agent image in Docker's local store (`docker image rm <image>`)
+and `tmp/self-running-agents/` with test.sh's logs. Auto Mode removes the run's node on its
+own.
