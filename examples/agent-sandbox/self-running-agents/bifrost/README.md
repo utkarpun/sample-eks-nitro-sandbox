@@ -2,13 +2,9 @@
 
 [Bifrost](https://github.com/maximhq/bifrost) is an open-source model gateway. Here it
 calls Amazon Bedrock with a role of its own, for callers that send it Anthropic Messages
-requests with a key that is not an AWS credential. **The agent in this sample still calls
-Bedrock directly**: until four of the sample's files change, Bifrost runs beside it and
-nothing routes the agent through it. Those files are `deploy/run-job.yaml` (the agent's
-`CLAUDE_CODE_USE_BEDROCK` and model settings), `agent/settings.json` (an `apiKeyHelper`
-that reads the key), `kro/gateway-rgd.yaml` (the agent role's two Bedrock statements and
-the `bedrock-runtime` name in its egress rule, which also gains an allow for `bfx` on TCP
-8080) and `scripts/test.sh` (the egress canary).
+requests with a key that is not an AWS credential. The agent in this sample is such a
+caller: its role has no Bedrock statement and its egress rule no `bedrock-runtime` name
+(`kro/gateway-rgd.yaml`), so its model calls reach Bedrock only through Bifrost.
 
 What is code and what is not:
 
@@ -142,16 +138,13 @@ TODO: output from the fresh run
 | NC-B5 | an agent-labelled pod in `sra` | a pod in `sra` without the label; an agent-labelled pod in `bfx` |
 | T-B2 | a new pod with the key's token count kept, 1 replica answering | a key made only in the database (gone), 0 replicas (no answer) |
 
-`test.sh` makes one model call in total. Until the agent's egress rule (kro/gateway-rgd.yaml
-`egress`) also allows `bfx` on TCP 8080, NC-B5's first leg and T-B2's replica legs fail, and
-T-B2's 0-replica leg proves nothing.
+`test.sh` makes one model call in total.
 
 ## How a caller uses it
 
 A caller sets `ANTHROPIC_BASE_URL=http://bifrost.bfx.svc.cluster.local:8080/anthropic`,
 names the model `bedrock/<model id>`, and reads its key from the Secret `bifrost-agent-key`.
-Once the agent does, its own role needs no Bedrock permission and its egress rule no
-Bedrock host.
+The agent does this in `deploy/run-job.yaml` and `agent/settings.json`.
 
 **Network policy.** This fork ships Bifrost's network policy (and the agent's), though the
 upstream repository's rules say a new sample ships none: it is what keeps Bifrost reachable
