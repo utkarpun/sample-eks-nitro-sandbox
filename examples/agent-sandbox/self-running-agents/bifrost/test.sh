@@ -9,7 +9,7 @@
 #   T-B0   the agent's key gets a model answer through /anthropic
 #   NC-B7  an admin write without the admin login is refused 401, and nothing changed
 #   NC-B5  only agent-labelled pods in the agent namespace reach Bifrost on 8080
-#   T-B2   a new pod keeps the state in Postgres (the request count), config.json
+#   T-B2   a new pod keeps the state in Postgres (the key's token count), config.json
 #          wins (a key made only in the database is gone), and with 0 replicas
 #          nothing answers, with 1 it answers again
 source "$(dirname "$0")/lib.sh" || exit 1
@@ -43,7 +43,7 @@ vks() { admin "$B/api/governance/virtual-keys" | python3 -c 'import json,sys; v=
 usage() { admin "$B/api/governance/virtual-keys" | python3 -c '
 import json,sys
 for x in json.load(sys.stdin).get("virtual_keys",[]):
-    if x.get("name")=="agent": print((x.get("rate_limit") or {}).get("request_current_usage","none"))'; }
+    if x.get("name")=="agent": print((x.get("rate_limit") or {}).get("token_current_usage","none"))'; }
 pf_start() {
   kc -n "$BIFROST_NAMESPACE" port-forward svc/bifrost "$PORT:8080" >"$LOG_DIR/port-forward.log" 2>&1 & PF=$!
   for _ in $(seq 20); do curl -s -m 2 -o /dev/null "$B/health" && return 0; sleep 1; done; return 1
@@ -65,11 +65,12 @@ spec:
   containers:
     - name: probe
       image: $PROBE_IMAGE
-      command: [sh, -c, "for i in 1 2 3; do wget -q -T 5 -O /dev/null http://bifrost.$BIFROST_NAMESPACE.svc.cluster.local:8080/health && { echo REACHED; exit 0; }; sleep 3; done; echo REFUSED"]
+      command: [sh, -c, "r=REFUSED; for i in 1 2 3; do wget -q -T 5 -O /dev/null http://bifrost.$BIFROST_NAMESPACE.svc.cluster.local:8080/health && { r=REACHED; break; }; sleep 3; done; echo \$r > /dev/termination-log"]
       securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
 EOF
   kc -n "$AGENT_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$n" --timeout=300s >/dev/null 2>&1
-  kc -n "$AGENT_NAMESPACE" logs "$n" 2>&1 | tail -1
+  # The result comes back in the pod status, so no kubelet log read is needed.
+  kc -n "$AGENT_NAMESPACE" get pod "$n" -o jsonpath='{.status.containerStatuses[0].state.terminated.message}' 2>&1
   kc -n "$AGENT_NAMESPACE" delete pod "$n" --ignore-not-found >/dev/null 2>&1
 }
 
@@ -138,7 +139,7 @@ verdict NC-B5 $([[ "$p1" == REACHED && "$p2" == REFUSED ]]; echo $?) "agent-labe
 
 # T-B2
 c=$(admin -o /dev/null -w '%{http_code}' -X POST "$B/api/governance/virtual-keys" -H 'content-type: application/json' -d '{"name":"db-only","is_active":true}')
-sleep 12   # the request counters reach the store every 10 s
+sleep 12   # the usage counters reach the store every 10 s
 u1="$(usage)"; k1="$(vks)"; old="$(pod_name)"
 pf_stop; kc -n "$BIFROST_NAMESPACE" delete pod "$old" --wait >/dev/null
 kc -n "$BIFROST_NAMESPACE" rollout status deploy/bifrost --timeout=300s >/dev/null; new="$(pod_name)"

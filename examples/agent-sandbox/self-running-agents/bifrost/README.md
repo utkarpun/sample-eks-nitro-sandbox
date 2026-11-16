@@ -77,7 +77,25 @@ The model and Region are in two places, kept equal by hand: `providers` and
 ./bifrost/apply.sh
 ```
 
-TODO: output from the fresh run
+From a fresh run with `BIFROST_NAMESPACE=bfx`, `AGENT_NAMESPACE=bfx-agent`,
+`NAME_PREFIX=bfx-w` and `MANAGED_BY=bfx`, so the names differ from the defaults. The
+cluster name, account, VPC and subnet IDs and the database host are replaced with
+placeholders, and two Helm warnings about another chart in the local repository cache are
+left out.
+
+```text
+cluster <CLUSTER_NAME>: account <ACCOUNT_ID>, VPC <VPC_ID> (192.168.0.0/16), subnets <SUBNET_ID_1>,<SUBNET_ID_2>,<SUBNET_ID_3>
+namespace/bfx created
+namespace/bfx labeled
+secret bfx/bifrost-db made
+secret bfx/bifrost-encryption made
+secret bfx/bifrost-admin made
+secret bfx/bifrost-agent-key made
+secret bfx-agent/bifrost-agent-key made
+waiting for the graph (RDS takes about 5 to 10 minutes)
+database bfx-w-bifrost.<DB_HOST_ID>.us-west-2.rds.amazonaws.com
+bifrost is up: http://bifrost.bfx.svc.cluster.local:8080
+```
 
 `apply.sh` makes four Secrets once, from random bytes, and never prints them: the database
 password, the encryption key, the admin login and the agent's key (`bifrost-agent-key`,
@@ -89,7 +107,20 @@ also copied into `AGENT_NAMESPACE` when that namespace exists). A re-run keeps t
 ./bifrost/test.sh
 ```
 
-TODO: output from the fresh run
+From the same deployment, with the same names. The role session name is replaced with a
+placeholder.
+
+```text
+BQ-3 PASS: ready replicas 1 with ApplicationNetworkPolicy bifrost in force
+CALLER PASS: caller is arn:aws:sts::<ACCOUNT_ID>:assumed-role/bfx-w-bifrost/<SESSION_NAME>
+IAM PASS: profile allowed; model alone implicitDeny; model through the profile allowed
+NC-B2 PASS: no key 401, wrong key 401; the agent's key on a model outside its list 403
+T-B0 PASS: HTTP 200, answer 'ok'
+NC-B7 PASS: write without login 401; keys before 'agent', after 'agent'
+NC-B5 PASS: agent-labelled pod REACHED, other pod REFUSED
+T-B2 PASS: db-only create 200; count 66 -> 66; keys 'agent db-only' -> 'agent'; pod bifrost-76f75c8fff-lrz4c -> bifrost-76f75c8fff-qcst6; key check 403 replicas 0: REFUSED; replicas 1: REACHED 
+8 passed, 0 failed
+```
 
 | Check | Accepts | Refuses |
 |---|---|---|
@@ -100,7 +131,7 @@ TODO: output from the fresh run
 | T-B0 | one model call with the agent's key | |
 | NC-B7 | | an admin write without the login (401), nothing changed |
 | NC-B5 | an agent-labelled pod in `AGENT_NAMESPACE` | any other pod |
-| T-B2 | a new pod with the request count kept, 1 replica answering | a key made only in the database (gone), 0 replicas (no answer) |
+| T-B2 | a new pod with the key's token count kept, 1 replica answering | a key made only in the database (gone), 0 replicas (no answer) |
 
 `test.sh` makes one model call in total.
 
@@ -123,6 +154,21 @@ Bedrock host.
 ./bifrost/destroy.sh
 ```
 
-TODO: output from the fresh run
+From the same names. The first four lines are from the fresh run's clean up; the
+read-back lines are from running `destroy.sh` again straight after, with the IAM role
+lookup this page ships (the fresh run's version read a paged list and could not tell).
+
+```text
+release bifrost removed
+deleting the graph (RDS takes about 5 to 10 minutes)
+bifrostbackend.kro.run "bifrost" deleted
+namespace bfx removed
+RDS instance bfx-w-bifrost: gone
+DB subnet group bfx-w-bifrost: gone
+security group bfx-w-bifrost-db: gone
+IAM role bfx-w-bifrost: gone
+Pod Identity association bfx/bifrost: gone
+clean up complete
+```
 
 It leaves kro and the ACK controllers, which are a shared install.

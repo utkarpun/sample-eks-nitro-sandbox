@@ -30,10 +30,17 @@ gone() {  # <what> <command...>: the command prints the count still there
   local n; n="$("${@:2}" 2>/dev/null)" || { echo "$1: could not determine"; incomplete=1; return; }
   if [[ "$n" == 0 ]]; then echo "$1: gone"; else echo "$1: still there ($n)"; incomplete=1; fi
 }
-db_left() { aws rds describe-db-instances --query "length(DBInstances[?DBInstanceIdentifier=='$NAME_PREFIX-bifrost'])" --output text; }
-sng_left() { aws rds describe-db-subnet-groups --query "length(DBSubnetGroups[?DBSubnetGroupName=='$NAME_PREFIX-bifrost'])" --output text; }
+# A list call pages, and a --query runs once per page, so each name is looked up by itself.
+left_by_name() {  # <not-found code> <aws command...>: 1 when it is there, 0 when AWS says not found
+  local e
+  if e="$("${@:2}" 2>&1)"; then echo 1
+  elif [[ "$e" == *"$1"* ]]; then echo 0
+  else return 1; fi
+}
+db_left() { left_by_name DBInstanceNotFound aws rds describe-db-instances --db-instance-identifier "$NAME_PREFIX-bifrost"; }
+sng_left() { left_by_name DBSubnetGroupNotFoundFault aws rds describe-db-subnet-groups --db-subnet-group-name "$NAME_PREFIX-bifrost"; }
 sg_left() { aws ec2 describe-security-groups --filters "Name=group-name,Values=$NAME_PREFIX-bifrost-db" --query 'length(SecurityGroups)' --output text; }
-role_left() { aws iam list-roles --query "length(Roles[?RoleName=='$NAME_PREFIX-bifrost'])" --output text; }
+role_left() { left_by_name NoSuchEntity aws iam get-role --role-name "$NAME_PREFIX-bifrost"; }
 pia_left() { aws eks list-pod-identity-associations --cluster-name "$CLUSTER_NAME" --namespace "$BIFROST_NAMESPACE" --service-account bifrost --query 'length(associations)' --output text; }
 gone "RDS instance $NAME_PREFIX-bifrost" db_left
 gone "DB subnet group $NAME_PREFIX-bifrost" sng_left
