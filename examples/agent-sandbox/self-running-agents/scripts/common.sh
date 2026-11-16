@@ -119,7 +119,10 @@ require_runtime_class() {
 }
 require_network_policy_enforcement() {
   local v cm=0 rc=0 crd=0
-  local off="It is a cluster-wide setting, so this script does not change it. Turn it on yourself:"
+  local off="It is a cluster-wide setting, so this script does not change it. Turn it on yourself.
+  On a cluster made by this sample's cluster/, where the ConfigMap is Terraform's, from the sample folder:
+  cd cluster && terraform apply -var 'endpoint_public_access_cidrs=[\"<your IP>/32\"]'
+  On your own cluster:"
   resource_exists kc_cluster -n kube-system configmap amazon-vpc-cni || cm=$?
   case $cm in
     1) die "network policy enforcement is off on this cluster (there is no amazon-vpc-cni ConfigMap in kube-system). $off
