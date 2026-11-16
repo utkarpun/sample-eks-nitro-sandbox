@@ -154,7 +154,7 @@ upstream.
 
 ## Stop it
 
-- `kubectl --context <KUBE_CONTEXT> -n bfx scale deploy/bifrost --replicas=0` stops every call through Bifrost.
+- `kubectl --context <KUBE_CONTEXT> -n bfx scale deploy/bifrost --replicas=0` (`KUBE_CONTEXT` from `.env`; leave out `--context` if it is empty) stops every call through Bifrost.
 - The agent's key is limited to 120 requests a minute and 40,000,000 tokens a day
   (`rl-agent` in `values.yaml`), shared by every run that uses it, and to the one model.
   There is no spend budget.
@@ -172,7 +172,8 @@ TODO: output from the fresh run
 **If clean up is incomplete**, the lines above it say what is left. A graph that did not
 delete in time leaves the namespace, its Secrets and possibly the RDS instance, which keeps
 billing: check it with `kubectl --context <KUBE_CONTEXT> -n bfx get bifrostbackend bifrost -o yaml` and
-`aws rds describe-db-instances --db-instance-identifier bfx-bifrost`, then run
+`aws rds describe-db-instances --region <AWS_REGION> --db-instance-identifier bfx-bifrost`
+(`AWS_REGION` from `.env`), then run
 `./bifrost/destroy.sh` again.
 
 It leaves kro and ACK, which come from `bootstrap/`.
