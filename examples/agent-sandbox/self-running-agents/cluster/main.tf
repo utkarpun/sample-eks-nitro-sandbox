@@ -13,12 +13,15 @@
 #
 # Then bootstrap/ (Step 0), then the example. Destroy in reverse: the example's
 # clean up, bootstrap/'s destroy, then here one `terraform destroy`, which deletes
-# the ConfigMap before the cluster (network-policy.tf depends_on). Two things can
-# outlive it: the secrets KMS key (alias eks/<cluster_name>) stays pending deletion
-# for 30 days, and anything Auto Mode made that the example's clean up missed (a load
-# balancer, an EBS volume, a network interface or a security group) blocks the VPC
-# delete. List those with `aws ec2 describe-network-interfaces` and
-# `aws ec2 describe-security-groups`, each filtered on the VPC's vpc-id.
+# the ConfigMap before the cluster (network-policy.tf depends_on). Some things can
+# outlive it. The secrets KMS key stays pending deletion for 30 days; destroy deletes
+# its alias, so find it by its description "<cluster_name> cluster encryption key".
+# An EBS volume Auto Mode made belongs to no VPC, so it outlives the destroy and keeps
+# billing; find it by the tag key eks:eks-cluster-name. A load balancer, a network
+# interface or a security group that the example's clean up missed blocks the VPC
+# delete. List those with `aws ec2 describe-network-interfaces
+# --include-managed-resources` and `aws ec2 describe-security-groups`, each filtered
+# on the VPC's vpc-id; Auto Mode network interfaces are hidden without that flag.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -38,9 +41,13 @@ module "vpc" {
   private_subnets = [for i in range(3) : cidrsubnet("10.0.0.0/16", 4, i)]
   public_subnets  = [for i in range(3) : cidrsubnet("10.0.0.0/16", 8, 48 + i)]
 
-  # One NAT gateway for the whole VPC, as eksctl's default makes.
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  # One NAT gateway per Availability Zone, as the EKS Best Practices Guide
+  # advises for a zone-independent design and lower cross-AZ cost
+  # (networking/subnets.adoc). This bills three NAT gateways and three
+  # Elastic IPs instead of one.
+  enable_nat_gateway     = true
+  single_nat_gateway     = false
+  one_nat_gateway_per_az = true
 }
 
 module "eks" {

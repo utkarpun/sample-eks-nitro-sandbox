@@ -507,6 +507,7 @@ sample's graphs, or Bifrost's), remove them:
 ```bash
 cd bootstrap
 terraform destroy -var cluster_name=<CLUSTER_NAME> -var region=us-west-2
+cd ..
 ```
 
 ```text
