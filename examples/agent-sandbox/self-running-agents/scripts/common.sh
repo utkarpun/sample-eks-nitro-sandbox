@@ -52,7 +52,7 @@ AWS_REGION="${AWS_REGION:-us-west-2}"
 export AWS_REGION
 if [[ -n "${AWS_PROFILE:-}" ]]; then export AWS_PROFILE; else unset AWS_PROFILE; fi
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
-CTX_ARG="${KUBE_CONTEXT:+ --context $KUBE_CONTEXT}"   # names the pinned context in kubectl commands printed for the reader
+[[ -n "$KUBE_CONTEXT" ]] && printf -v CTX_ARG ' --context %q' "$KUBE_CONTEXT" || CTX_ARG=""   # names the pinned context in kubectl commands printed for the reader
 BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-us.anthropic.claude-sonnet-5-5}"
 PROJECT_TAG="${PROJECT_TAG:-self-running-agents}"   # the Project tag on every AWS resource
 KUBECTL="${KUBECTL:-kubectl}"
