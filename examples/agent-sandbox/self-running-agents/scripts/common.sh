@@ -120,19 +120,19 @@ require_runtime_class() {
 require_network_policy_enforcement() {
   local v cm=0 rc=0 crd=0
   local off="It is a cluster-wide setting, so this script does not change it. Turn it on yourself.
-  On a cluster made by this sample's cluster/, where the ConfigMap is Terraform's, from the sample folder:
-  cd cluster && terraform apply -var 'endpoint_public_access_cidrs=[\"<your IP>/32\"]'
+  On a cluster made by this sample's cluster/, where the ConfigMap is Terraform's, with the same -var values you made it with:
+  terraform -chdir=$SAMPLE_DIR/cluster apply -var 'endpoint_public_access_cidrs=[\"<your IP>/32\"]'
   On your own cluster:"
   resource_exists kc_cluster -n kube-system configmap amazon-vpc-cni || cm=$?
   case $cm in
-    1) die "network policy enforcement is off on this cluster (there is no amazon-vpc-cni ConfigMap in kube-system). $off
+    1) die "network policy enforcement is off on context ${KUBE_CONTEXT:-<current>} (there is no amazon-vpc-cni ConfigMap in kube-system). $off
   kubectl -n kube-system create configmap amazon-vpc-cni --from-literal=enable-network-policy-controller=true" ;;
     2) die "could not read the amazon-vpc-cni ConfigMap in kube-system, so whether network policy enforcement is on could not be determined" ;;
   esac
   v="$(kc_cluster -n kube-system get configmap amazon-vpc-cni \
     -o jsonpath='{.data.enable-network-policy-controller}' 2>/dev/null)" || rc=$?
   [[ $rc -ne 0 ]] && die "could not read the amazon-vpc-cni ConfigMap in kube-system, so whether network policy enforcement is on could not be determined"
-  [[ "$v" == "true" ]] || die "network policy enforcement is off on this cluster (enable-network-policy-controller is '${v:-<unset>}'). $off
+  [[ "$v" == "true" ]] || die "network policy enforcement is off on context ${KUBE_CONTEXT:-<current>} (enable-network-policy-controller is '${v:-<unset>}'). $off
   kubectl -n kube-system patch configmap amazon-vpc-cni --type merge -p '{\"data\":{\"enable-network-policy-controller\":\"true\"}}'"
   resource_exists kc_cluster crd applicationnetworkpolicies.networking.k8s.aws || crd=$?
   case $crd in
