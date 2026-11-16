@@ -1,0 +1,204 @@
+# kro ResourceGraphDefinition: everything Bifrost needs around its Helm release.
+# AWS side through ACK: the Postgres store on RDS (security group, subnet group,
+# DB instance), the role Bifrost calls Bedrock with and its Pod Identity
+# association. Kubernetes side: the ServiceAccount, a fixed in-namespace name for
+# the database (Service bifrost-db) and Bifrost's network policy.
+# The Bifrost Deployment itself comes from the official Helm chart (values.yaml);
+# kro has no Helm resource, so apply.sh installs the chart once this instance is
+# ACTIVE. Every object lands in the instance's namespace.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: bifrost-backend
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: BifrostBackend
+    spec:
+      # Names every AWS resource: <prefix>-bifrost.
+      prefix: string | default="self-running-agents"
+      # The ManagedBy tag on every AWS resource made here, so a clean up can
+      # tell this sample's resources from anyone else's.
+      managedBy: string | default="self-running-agents"
+      clusterName: string
+      accountID: string
+      region: string | default="us-west-2"
+      # The cluster's VPC, its CIDR (who may reach Postgres on 5432) and the
+      # private subnets the database may use, one per AZ at least two AZs.
+      vpcID: string
+      vpcCIDR: string
+      subnetIDs: "[]string"
+      # The one inference profile Bifrost may call.
+      modelID: string | default="us.anthropic.claude-sonnet-5-5"
+      # The model behind that profile, without the geography prefix.
+      foundationModelID: string | default="anthropic.claude-sonnet-5-5"
+      # The namespace of the agent pods, the only callers allowed in.
+      agentNamespace: string
+      dbInstanceClass: string | default="db.t4g.micro"
+      dbEngineVersion: string | default="17.11"
+      dbAllocatedStorage: integer | default=20
+      dbBackupRetentionDays: integer | default=1
+      # RDS Multi-AZ keeps a standby in a second AZ, at twice the instance price.
+      dbMultiAZ: boolean | default=false
+    status:
+      dbHost: ${db.status.endpoint.address}
+      roleARN: ${role.status.ackResourceMetadata.arn}
+  resources:
+    - id: dbSecurityGroup
+      template:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: SecurityGroup
+        metadata:
+          name: ${schema.spec.prefix}-bifrost-db
+        spec:
+          name: ${schema.spec.prefix}-bifrost-db
+          description: Postgres for Bifrost, from inside the cluster VPC only
+          vpcID: ${schema.spec.vpcID}
+          ingressRules:
+            - ipProtocol: tcp
+              fromPort: 5432
+              toPort: 5432
+              ipRanges:
+                - cidrIP: ${schema.spec.vpcCIDR}
+                  description: cluster VPC
+          tags:
+            - key: Name
+              value: ${schema.spec.prefix}-bifrost-db
+            - key: ManagedBy
+              value: ${schema.spec.managedBy}
+
+    - id: dbSubnetGroup
+      template:
+        apiVersion: rds.services.k8s.aws/v1alpha1
+        kind: DBSubnetGroup
+        metadata:
+          name: ${schema.spec.prefix}-bifrost
+        spec:
+          name: ${schema.spec.prefix}-bifrost
+          description: Bifrost Postgres, the cluster's private subnets
+          subnetIDs: ${schema.spec.subnetIDs}
+          tags:
+            - key: ManagedBy
+              value: ${schema.spec.managedBy}
+
+    # Not public, encrypted, TLS forced (the postgres17 default parameter group
+    # sets rds.force_ssl 1). The master password is the Secret bifrost-db that
+    # apply.sh makes; Bifrost reads the same Secret.
+    - id: db
+      readyWhen:
+        - ${db.status.dbInstanceStatus == "available"}
+      template:
+        apiVersion: rds.services.k8s.aws/v1alpha1
+        kind: DBInstance
+        metadata:
+          name: ${schema.spec.prefix}-bifrost
+        spec:
+          dbInstanceIdentifier: ${schema.spec.prefix}-bifrost
+          dbInstanceClass: ${schema.spec.dbInstanceClass}
+          engine: postgres
+          engineVersion: ${schema.spec.dbEngineVersion}
+          allocatedStorage: ${schema.spec.dbAllocatedStorage}
+          storageType: gp3
+          storageEncrypted: true
+          multiAZ: ${schema.spec.dbMultiAZ}
+          publiclyAccessible: false
+          deletionProtection: false
+          backupRetentionPeriod: ${schema.spec.dbBackupRetentionDays}
+          dbName: bifrost
+          masterUsername: bifrost
+          masterUserPassword:
+            namespace: ${schema.metadata.namespace}
+            name: bifrost-db
+            key: password
+          dbSubnetGroupName: ${dbSubnetGroup.spec.name}
+          vpcSecurityGroupIDs:
+            - ${dbSecurityGroup.status.id}
+          tags:
+            - key: ManagedBy
+              value: ${schema.spec.managedBy}
+
+    # The chart's values name the database by this fixed in-namespace host, so
+    # the RDS endpoint never has to be written into the Helm values.
+    - id: dbService
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: bifrost-db
+        spec:
+          type: ExternalName
+          externalName: ${db.status.endpoint.address}
+
+    # Bifrost's own role: the one inference profile, and its foundation model in
+    # the Regions the profile routes to, only when called through that profile
+    # (the Bedrock User Guide's policy for geographic cross-Region inference).
+    # Trusted only from this cluster, namespace and ServiceAccount.
+    - id: role
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.prefix}-bifrost
+        spec:
+          name: ${schema.spec.prefix}-bifrost
+          description: Bifrost model gateway (Pod Identity)
+          assumeRolePolicyDocument: |
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"],"Condition":{"StringEquals":{"aws:SourceAccount":"${schema.spec.accountID}","aws:RequestTag/eks-cluster-arn":"arn:aws:eks:${schema.spec.region}:${schema.spec.accountID}:cluster/${schema.spec.clusterName}","aws:RequestTag/kubernetes-namespace":"${schema.metadata.namespace}","aws:RequestTag/kubernetes-service-account":"bifrost"}}}]}
+          inlinePolicies:
+            bedrock: |
+              {"Version":"2012-10-17","Statement":[{"Sid":"InvokeTheOneInferenceProfile","Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],"Resource":"arn:aws:bedrock:${schema.spec.region}:${schema.spec.accountID}:inference-profile/${schema.spec.modelID}"},{"Sid":"InvokeModelsOnlyThroughThatProfile","Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],"Resource":"arn:aws:bedrock:*::foundation-model/${schema.spec.foundationModelID}","Condition":{"StringEquals":{"bedrock:InferenceProfileArn":"arn:aws:bedrock:${schema.spec.region}:${schema.spec.accountID}:inference-profile/${schema.spec.modelID}"}}}]}
+          tags:
+            - key: ManagedBy
+              value: ${schema.spec.managedBy}
+
+    - id: serviceAccount
+      template:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: bifrost
+        automountServiceAccountToken: false
+
+    - id: podIdentity
+      template:
+        apiVersion: eks.services.k8s.aws/v1alpha1
+        kind: PodIdentityAssociation
+        metadata:
+          name: ${schema.spec.prefix}-bifrost
+        spec:
+          clusterName: ${schema.spec.clusterName}
+          namespace: ${schema.metadata.namespace}
+          serviceAccount: ${serviceAccount.metadata.name}
+          roleARN: ${role.status.ackResourceMetadata.arn}
+          tags:
+            ManagedBy: ${schema.spec.managedBy}
+
+    # Who may reach Bifrost and where it may connect, enforced by EKS Auto Mode's
+    # network policy. In: agent pods on 8080. Out: DNS, the Pod Identity agent,
+    # Bedrock and Postgres. Pricing is local, so nothing else.
+    - id: networkPolicy
+      template:
+        apiVersion: networking.k8s.aws/v1alpha1
+        kind: ApplicationNetworkPolicy
+        metadata:
+          name: bifrost
+        spec:
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: bifrost }
+          policyTypes: [Ingress, Egress]
+          ingress:
+            - from:
+                - namespaceSelector:
+                    matchLabels: { kubernetes.io/metadata.name: "${schema.spec.agentNamespace}" }
+                  podSelector:
+                    matchLabels: { app.kubernetes.io/name: agent }
+              ports: [ { protocol: TCP, port: 8080 } ]
+          egress:
+            - to: [ { ipBlock: { cidr: 0.0.0.0/0 } } ]
+              ports: [ { protocol: UDP, port: 53 }, { protocol: TCP, port: 53 } ]
+            - to: [ { ipBlock: { cidr: 169.254.170.23/32 } } ]
+              ports: [ { protocol: TCP, port: 80 } ]
+            - to: [ { domainNames: [ "bedrock-runtime.${schema.spec.region}.amazonaws.com" ] } ]
+              ports: [ { protocol: TCP, port: 443 } ]
+            - to: [ { ipBlock: { cidr: "${schema.spec.vpcCIDR}" } } ]
+              ports: [ { protocol: TCP, port: 5432 } ]

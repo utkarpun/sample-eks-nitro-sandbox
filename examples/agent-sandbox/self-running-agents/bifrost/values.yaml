@@ -1,0 +1,107 @@
+# Values for the official Bifrost chart (helm-charts/bifrost 2.1.48, maximhq/bifrost
+# tag transports/v2.5.1). Bifrost keeps its state in Postgres on RDS (rgd.yaml),
+# so the pod holds nothing and can be replaced on any node. One replica: Bifrost
+# OSS does not support several processes on one Postgres database
+# (docs/deployment-guides/runtime-contract.mdx:235).
+# No secret is written here: every one comes from a Secret apply.sh makes, and the
+# rendered config.json holds only env. references to them.
+replicaCount: 1
+image:
+  repository: docker.io/maximhq/bifrost
+  # The multi-arch index (linux/amd64 and linux/arm64), so any node will do.
+  tag: "v2.5.1@sha256:5ec9873acaf1687556b6e4dd854b92b539d9debf87a5a683b66338648b84d3c8"
+fullnameOverride: bifrost
+# The ServiceAccount comes from rgd.yaml, with its Pod Identity association.
+serviceAccount:
+  create: false
+  automount: false
+  name: bifrost
+podLabels:
+  app.kubernetes.io/name: bifrost
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+  runAsUser: 1000
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { cpu: 250m, memory: 512Mi }
+# The root filesystem is read-only. Bifrost's entrypoint exits unless /app/data is
+# writable (transports/docker-entrypoint.sh:48-62), so it gets an emptyDir; it
+# holds no state, which is all in Postgres.
+volumes:
+  - { name: appdata, emptyDir: {} }
+  - { name: tmp, emptyDir: {} }
+  - { name: pricing, configMap: { name: bifrost-pricing } }
+volumeMounts:
+  - { name: appdata, mountPath: /app/data }
+  - { name: tmp, mountPath: /tmp }
+  - { name: pricing, mountPath: /app/pricing, readOnly: true }
+env:
+  # Credentials come only from Pod Identity, never from the node's instance role.
+  - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
+  - name: BIFROST_AGENT_VK
+    valueFrom: { secretKeyRef: { name: bifrost-agent-key, key: key } }
+storage:
+  mode: postgres
+  configStore: { enabled: true }
+  logsStore: { enabled: false }
+postgresql:
+  enabled: false
+  external:
+    enabled: true
+    # Service bifrost-db (rgd.yaml) points at the RDS endpoint.
+    host: bifrost-db
+    port: 5432
+    user: bifrost
+    database: bifrost
+    sslMode: require
+    existingSecret: bifrost-db
+    passwordKey: password
+bifrost:
+  # config.json wins on every start: what it names is put back as written and any
+  # row made only in the database for those sections is removed.
+  sourceOfTruth: "config.json"
+  encryptionKeySecret: { name: bifrost-encryption, key: encryption-key }
+  authConfig:
+    isEnabled: true
+    existingSecret: bifrost-admin
+    usernameKey: username
+    passwordKey: password
+  client:
+    allowedOrigins: []
+    enforceAuthOnInference: true
+  framework:
+    pricing:
+      # Local copies of the one model's entries, so Bifrost needs no egress for
+      # pricing (the defaults fetch https://getbifrost.ai/datasheet at start).
+      pricingUrl: "file:///app/pricing/pricing.json"
+      modelParametersUrl: "file:///app/pricing/model-parameters.json"
+      liveModelsSyncInterval: 0
+      mcpLibrarySyncInterval: 0
+  providers:
+    bedrock:
+      keys:
+        # No access key: Bifrost uses the AWS SDK's default chain, which reads
+        # the Pod Identity credentials.
+        - id: bedrock-key-1
+          name: bedrock-key-1
+          bedrock_key_config: { region: us-west-2 }
+          weight: 1
+          models: [us.anthropic.claude-sonnet-5-5]
+  governance:
+    rateLimits:
+      - { id: rl-agent, request_max_limit: 120, request_reset_duration: "1m" }
+    virtualKeys:
+      - id: agent
+        name: agent
+        value: env.BIFROST_AGENT_VK
+        is_active: true
+        rate_limit_id: rl-agent
+        provider_configs:
+          - provider: bedrock
+            weight: 1
+            allowed_models: [us.anthropic.claude-sonnet-5-5]
+            key_ids: [bedrock-key-1]

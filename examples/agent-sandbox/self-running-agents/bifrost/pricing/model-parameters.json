@@ -1,0 +1,701 @@
+{
+  "anthropic.claude-sonnet-5-5": {
+    "base_model": "claude-sonnet-5-5",
+    "bedrock_converse_supports_strict_tools": false,
+    "bedrock_output_config_effort_ceiling": "xhigh",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
+    "mode": "chat",
+    "model_parameters": [
+      {
+        "helpText": "A list of tools the model may call.",
+        "id": "promptTools",
+        "label": "Prompt Tools (Functions)",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "default": 4096,
+        "helpText": "The maximum number of tokens that can be generated in the Result.",
+        "id": "max_tokens",
+        "label": "Max Tokens",
+        "range": {
+          "max": 128000,
+          "min": 1
+        },
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "type": "number"
+      },
+      {
+        "array": {
+          "maxElements": 4,
+          "minElements": 1,
+          "type": "text"
+        },
+        "helpText": "Custom text sequences that will cause the model to stop generating.",
+        "id": "stop_sequences",
+        "label": "Stop Sequence",
+        "type": "array"
+      },
+      {
+        "accesorKey": "type",
+        "default": {
+          "type": "text"
+        },
+        "id": "thinking",
+        "label": "Thinking",
+        "options": [
+          {
+            "label": "adaptive",
+            "value": "adaptive"
+          },
+          {
+            "label": "between_tools",
+            "value": "between_tools"
+          }
+        ],
+        "type": "select"
+      },
+      {
+        "accesorKey": "effort",
+        "default": {
+          "type": "text"
+        },
+        "id": "output_config",
+        "label": "output_config",
+        "options": [
+          {
+            "label": "max",
+            "value": "max"
+          },
+          {
+            "label": "xhigh",
+            "value": "xhigh"
+          },
+          {
+            "label": "high",
+            "value": "high"
+          },
+          {
+            "label": "medium",
+            "value": "medium"
+          },
+          {
+            "label": "low",
+            "value": "low"
+          }
+        ],
+        "type": "select"
+      },
+      {
+        "default": "medium",
+        "helpText": "Reasoning effort gives the model guidance on how many reasoning tokens to generate before answering. Lower values favour speed and economical token usage; higher values favour more complete reasoning.",
+        "id": "reasoning_effort",
+        "label": "Reasoning Effort",
+        "options": [
+          {
+            "label": "Low",
+            "value": "low"
+          },
+          {
+            "label": "Medium",
+            "value": "medium"
+          },
+          {
+            "label": "High",
+            "value": "high"
+          },
+          {
+            "label": "XHigh",
+            "value": "xhigh"
+          },
+          {
+            "label": "Max",
+            "value": "max"
+          }
+        ],
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "accesorKey": "type",
+        "default": {
+          "type": "text"
+        },
+        "helpText": "The format of the response. If set to 'Structured output', the response will match the supplied JSON schema.",
+        "id": "response_format",
+        "label": "Response Format",
+        "options": [
+          {
+            "label": "Structured output",
+            "subFields": [
+              {
+                "default": {
+                  "name": "",
+                  "schema": {},
+                  "strict": true
+                },
+                "helpText": "A JSON schema that the model will follow when generating the response.",
+                "id": "json_schema",
+                "label": "JSON Schema",
+                "type": "json"
+              }
+            ],
+            "value": "json_schema"
+          },
+          {
+            "label": "Text",
+            "value": "text"
+          }
+        ],
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "helpText": "An external identifier for the user who is associated with the request.",
+        "id": "metadata",
+        "label": "Metadata",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "text"
+      },
+      {
+        "default": false,
+        "helpText": "The stream parameter in the API controls whether the response is sent in incremental updates, like tokenized data as it's generated, or as a complete result in one go.",
+        "id": "stream",
+        "label": "Stream",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions",
+          "/v1/responses"
+        ],
+        "type": "boolean"
+      }
+    ],
+    "prompt_cache_min_tokens": 1024,
+    "provider": "bedrock",
+    "reasoning_effort_levels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "supported_regions": [
+      "us-east-1",
+      "us-east-2",
+      "us-west-1",
+      "us-west-2",
+      "ca-central-1",
+      "ca-west-1",
+      "us-gov-west-1",
+      "us-gov-east-1",
+      "eu-central-1",
+      "eu-central-2",
+      "eu-north-1",
+      "eu-south-1",
+      "eu-south-2",
+      "eu-west-1",
+      "eu-west-2",
+      "eu-west-3",
+      "ap-east-2",
+      "ap-northeast-1",
+      "ap-northeast-2",
+      "ap-northeast-3",
+      "ap-south-1",
+      "ap-south-2",
+      "ap-southeast-1",
+      "ap-southeast-2",
+      "ap-southeast-3",
+      "ap-southeast-4",
+      "ap-southeast-5",
+      "ap-southeast-6",
+      "ap-southeast-7",
+      "il-central-1",
+      "me-central-1",
+      "me-south-1",
+      "af-south-1",
+      "sa-east-1",
+      "mx-central-1"
+    ],
+    "supports_adaptive_thinking": true,
+    "supports_assistant_prefill": false,
+    "supports_audio_input": false,
+    "supports_audio_output": false,
+    "supports_bedrock_native_structured_output": true,
+    "supports_computer_use": true,
+    "supports_forced_tool_choice": false,
+    "supports_forced_tool_use": false,
+    "supports_function_calling": true,
+    "supports_max_reasoning_effort": true,
+    "supports_mid_conversation_system": true,
+    "supports_mid_conversation_system_messages": false,
+    "supports_native_structured_output": false,
+    "supports_output_config": true,
+    "supports_parallel_tool_use_config": true,
+    "supports_pdf_input": true,
+    "supports_prompt_caching": true,
+    "supports_reasoning": true,
+    "supports_reasoning_disable": false,
+    "supports_response_schema": true,
+    "supports_safeguards": true,
+    "supports_sampling_params": false,
+    "supports_tool_choice": true,
+    "supports_tool_search": true,
+    "supports_vision": true,
+    "supports_xhigh_reasoning_effort": true,
+    "thinking_always_on": true,
+    "token_count_model": {
+      "litellm_provider": "bedrock_mantle",
+      "model": "anthropic.claude-opus-5-5",
+      "region": "us-east-1"
+    }
+  },
+  "bedrock/us.anthropic.claude-sonnet-5-5": {
+    "base_model": "claude-sonnet-5-5",
+    "bedrock_converse_supports_strict_tools": false,
+    "bedrock_output_config_effort_ceiling": "xhigh",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
+    "mode": "chat",
+    "model_parameters": [
+      {
+        "helpText": "A list of tools the model may call.",
+        "id": "promptTools",
+        "label": "Prompt Tools (Functions)",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "default": 4096,
+        "helpText": "The maximum number of tokens that can be generated in the Result.",
+        "id": "max_tokens",
+        "label": "Max Tokens",
+        "range": {
+          "max": 128000,
+          "min": 1
+        },
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "type": "number"
+      },
+      {
+        "array": {
+          "maxElements": 4,
+          "minElements": 1,
+          "type": "text"
+        },
+        "helpText": "Custom text sequences that will cause the model to stop generating.",
+        "id": "stop_sequences",
+        "label": "Stop Sequence",
+        "type": "array"
+      },
+      {
+        "accesorKey": "type",
+        "default": {
+          "type": "text"
+        },
+        "id": "thinking",
+        "label": "Thinking",
+        "options": [
+          {
+            "label": "adaptive",
+            "value": "adaptive"
+          },
+          {
+            "label": "between_tools",
+            "value": "between_tools"
+          }
+        ],
+        "type": "select"
+      },
+      {
+        "accesorKey": "effort",
+        "default": {
+          "type": "text"
+        },
+        "id": "output_config",
+        "label": "output_config",
+        "options": [
+          {
+            "label": "max",
+            "value": "max"
+          },
+          {
+            "label": "xhigh",
+            "value": "xhigh"
+          },
+          {
+            "label": "high",
+            "value": "high"
+          },
+          {
+            "label": "medium",
+            "value": "medium"
+          },
+          {
+            "label": "low",
+            "value": "low"
+          }
+        ],
+        "type": "select"
+      },
+      {
+        "default": "medium",
+        "helpText": "Reasoning effort gives the model guidance on how many reasoning tokens to generate before answering. Lower values favour speed and economical token usage; higher values favour more complete reasoning.",
+        "id": "reasoning_effort",
+        "label": "Reasoning Effort",
+        "options": [
+          {
+            "label": "Low",
+            "value": "low"
+          },
+          {
+            "label": "Medium",
+            "value": "medium"
+          },
+          {
+            "label": "High",
+            "value": "high"
+          },
+          {
+            "label": "XHigh",
+            "value": "xhigh"
+          },
+          {
+            "label": "Max",
+            "value": "max"
+          }
+        ],
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "accesorKey": "type",
+        "default": {
+          "type": "text"
+        },
+        "helpText": "The format of the response. If set to 'Structured output', the response will match the supplied JSON schema.",
+        "id": "response_format",
+        "label": "Response Format",
+        "options": [
+          {
+            "label": "Structured output",
+            "subFields": [
+              {
+                "default": {
+                  "name": "",
+                  "schema": {},
+                  "strict": true
+                },
+                "helpText": "A JSON schema that the model will follow when generating the response.",
+                "id": "json_schema",
+                "label": "JSON Schema",
+                "type": "json"
+              }
+            ],
+            "value": "json_schema"
+          },
+          {
+            "label": "Text",
+            "value": "text"
+          }
+        ],
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "helpText": "An external identifier for the user who is associated with the request.",
+        "id": "metadata",
+        "label": "Metadata",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "text"
+      },
+      {
+        "default": false,
+        "helpText": "The stream parameter in the API controls whether the response is sent in incremental updates, like tokenized data as it's generated, or as a complete result in one go.",
+        "id": "stream",
+        "label": "Stream",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions",
+          "/v1/responses"
+        ],
+        "type": "boolean"
+      }
+    ],
+    "prompt_cache_min_tokens": 512,
+    "provider": "bedrock",
+    "source": "https://aws.amazon.com/bedrock/pricing/",
+    "supports_adaptive_thinking": true,
+    "supports_assistant_prefill": false,
+    "supports_computer_use": true,
+    "supports_forced_tool_choice": false,
+    "supports_forced_tool_use": false,
+    "supports_function_calling": true,
+    "supports_max_reasoning_effort": true,
+    "supports_mid_conversation_system": true,
+    "supports_mid_conversation_system_messages": false,
+    "supports_native_structured_output": false,
+    "supports_output_config": true,
+    "supports_parallel_tool_use_config": true,
+    "supports_pdf_input": true,
+    "supports_prompt_caching": true,
+    "supports_reasoning": true,
+    "supports_response_schema": true,
+    "supports_safeguards": true,
+    "supports_sampling_params": false,
+    "supports_tool_choice": true,
+    "supports_tool_search": true,
+    "supports_vision": true,
+    "supports_xhigh_reasoning_effort": true,
+    "thinking_always_on": true
+  },
+  "us.anthropic.claude-sonnet-5-5": {
+    "base_model": "claude-sonnet-5-5",
+    "bedrock_converse_supports_strict_tools": false,
+    "bedrock_output_config_effort_ceiling": "xhigh",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
+    "mode": "chat",
+    "model_parameters": [
+      {
+        "helpText": "A list of tools the model may call.",
+        "id": "promptTools",
+        "label": "Prompt Tools (Functions)",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "default": 4096,
+        "helpText": "The maximum number of tokens that can be generated in the Result.",
+        "id": "max_tokens",
+        "label": "Max Tokens",
+        "range": {
+          "max": 128000,
+          "min": 1
+        },
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions"
+        ],
+        "type": "number"
+      },
+      {
+        "array": {
+          "maxElements": 4,
+          "minElements": 1,
+          "type": "text"
+        },
+        "helpText": "Custom text sequences that will cause the model to stop generating.",
+        "id": "stop_sequences",
+        "label": "Stop Sequence",
+        "type": "array"
+      },
+      {
+        "accesorKey": "type",
+        "default": {
+          "type": "text"
+        },
+        "id": "thinking",
+        "label": "Thinking",
+        "options": [
+          {
+            "label": "adaptive",
+            "value": "adaptive"
+          },
+          {
+            "label": "between_tools",
+            "value": "between_tools"
+          }
+        ],
+        "type": "select"
+      },
+      {
+        "accesorKey": "effort",
+        "default": {
+          "type": "text"
+        },
+        "id": "output_config",
+        "label": "output_config",
+        "options": [
+          {
+            "label": "max",
+            "value": "max"
+          },
+          {
+            "label": "xhigh",
+            "value": "xhigh"
+          },
+          {
+            "label": "high",
+            "value": "high"
+          },
+          {
+            "label": "medium",
+            "value": "medium"
+          },
+          {
+            "label": "low",
+            "value": "low"
+          }
+        ],
+        "type": "select"
+      },
+      {
+        "default": "medium",
+        "helpText": "Reasoning effort gives the model guidance on how many reasoning tokens to generate before answering. Lower values favour speed and economical token usage; higher values favour more complete reasoning.",
+        "id": "reasoning_effort",
+        "label": "Reasoning Effort",
+        "options": [
+          {
+            "label": "Low",
+            "value": "low"
+          },
+          {
+            "label": "Medium",
+            "value": "medium"
+          },
+          {
+            "label": "High",
+            "value": "high"
+          },
+          {
+            "label": "XHigh",
+            "value": "xhigh"
+          },
+          {
+            "label": "Max",
+            "value": "max"
+          }
+        ],
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "accesorKey": "type",
+        "default": {
+          "type": "text"
+        },
+        "helpText": "The format of the response. If set to 'Structured output', the response will match the supplied JSON schema.",
+        "id": "response_format",
+        "label": "Response Format",
+        "options": [
+          {
+            "label": "Structured output",
+            "subFields": [
+              {
+                "default": {
+                  "name": "",
+                  "schema": {},
+                  "strict": true
+                },
+                "helpText": "A JSON schema that the model will follow when generating the response.",
+                "id": "json_schema",
+                "label": "JSON Schema",
+                "type": "json"
+              }
+            ],
+            "value": "json_schema"
+          },
+          {
+            "label": "Text",
+            "value": "text"
+          }
+        ],
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "select"
+      },
+      {
+        "helpText": "An external identifier for the user who is associated with the request.",
+        "id": "metadata",
+        "label": "Metadata",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/responses"
+        ],
+        "type": "text"
+      },
+      {
+        "default": false,
+        "helpText": "The stream parameter in the API controls whether the response is sent in incremental updates, like tokenized data as it's generated, or as a complete result in one go.",
+        "id": "stream",
+        "label": "Stream",
+        "supported_endpoints": [
+          "/v1/chat/completions",
+          "/v1/completions",
+          "/v1/responses"
+        ],
+        "type": "boolean"
+      }
+    ],
+    "prompt_cache_min_tokens": 512,
+    "provider": "bedrock",
+    "source": "https://aws.amazon.com/bedrock/pricing/",
+    "supports_adaptive_thinking": true,
+    "supports_assistant_prefill": false,
+    "supports_computer_use": true,
+    "supports_forced_tool_choice": false,
+    "supports_forced_tool_use": false,
+    "supports_function_calling": true,
+    "supports_max_reasoning_effort": true,
+    "supports_mid_conversation_system": true,
+    "supports_mid_conversation_system_messages": false,
+    "supports_native_structured_output": true,
+    "supports_output_config": true,
+    "supports_parallel_function_calling": true,
+    "supports_parallel_tool_use_config": true,
+    "supports_pdf_input": true,
+    "supports_prompt_caching": true,
+    "supports_reasoning": true,
+    "supports_response_schema": true,
+    "supports_safeguards": true,
+    "supports_sampling_params": false,
+    "supports_tool_choice": true,
+    "supports_tool_search": true,
+    "supports_vision": true,
+    "supports_xhigh_reasoning_effort": true,
+    "thinking_always_on": true
+  }
+}
