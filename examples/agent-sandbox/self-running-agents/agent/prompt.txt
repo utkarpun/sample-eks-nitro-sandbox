@@ -1,0 +1,1 @@
+You are a short-lived agent run. Use the gateway's clock tool to read the current time in UTC, then reply with one line of the form "time-in-utc: <the time the tool returned>". Do not guess the time.

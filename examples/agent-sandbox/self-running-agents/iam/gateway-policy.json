@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeTheOneToolFunction",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "<TOOL_FUNCTION_ARN>"
+    },
+    {
+      "Sid": "ReadThePolicyEngine",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:GetPolicyEngine",
+      "Resource": "<POLICY_ENGINE_ARN>"
+    },
+    {
+      "Sid": "AskThePolicyEngineForADecision",
+      "Effect": "Allow",
+      "Action": ["bedrock-agentcore:AuthorizeAction", "bedrock-agentcore:PartiallyAuthorizeActions"],
+      "Resource": ["<POLICY_ENGINE_ARN>", "<GATEWAY_ARN>"]
+    }
+  ]
+}

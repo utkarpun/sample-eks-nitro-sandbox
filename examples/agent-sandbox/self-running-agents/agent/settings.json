@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "deny": [
+      "Bash",
+      "PowerShell",
+      "Monitor",
+      "LSP",
+      "Workflow",
+      "Agent",
+      "Skill",
+      "EnterWorktree",
+      "ExitWorktree",
+      "WebFetch",
+      "WebSearch",
+      "Read",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "Glob",
+      "Grep"
+    ],
+    "allow": [
+      "mcp__gateway"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeTheOneInferenceProfileTheAgentUses",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": "arn:aws:bedrock:<AWS_REGION>:<ACCOUNT_ID>:inference-profile/<BEDROCK_MODEL_ID>"
+    },
+    {
+      "Sid": "InvokeTheFoundationModelsThatProfileRoutesTo",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": ["<FOUNDATION_MODEL_ARNS>"]
+    },
+    {
+      "Sid": "CallTheOneGateway",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:InvokeGateway",
+      "Resource": "<GATEWAY_ARN>"
+    },
+    {
+      "Sid": "StoreRunOutputOnly",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::<RUN_BUCKET>/runs/*"
+    }
+  ]
+}

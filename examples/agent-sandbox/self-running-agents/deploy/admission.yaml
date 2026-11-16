@@ -1,0 +1,38 @@
+# Admission for the sample's namespace, built into Kubernetes (no policy engine
+# to install). Every pod created in <NAMESPACE> must run in an isolated Nitro
+# sandbox and must not mount a service-account token. The token rule is here
+# because an isolated sandbox does receive the token when automount is on, so
+# turning it off in each pod spec is the only thing that keeps it out, and this
+# makes forgetting it a refused pod instead of a quiet one.
+#
+# Both objects are cluster-scoped, named for the namespace, and match only it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: self-running-agents-<NAMESPACE>
+  labels: { app.kubernetes.io/managed-by: self-running-agents }
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false"
+      message: "pods in this namespace must set automountServiceAccountToken: false"
+    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'isolated-sandbox'"
+      message: "pods in this namespace must set runtimeClassName: isolated-sandbox"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: self-running-agents-<NAMESPACE>
+  labels: { app.kubernetes.io/managed-by: self-running-agents }
+spec:
+  policyName: self-running-agents-<NAMESPACE>
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: <NAMESPACE> }
