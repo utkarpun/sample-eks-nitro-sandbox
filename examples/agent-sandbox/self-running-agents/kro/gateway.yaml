@@ -1,8 +1,7 @@
 # The one SraGateway instance, applied after the SraBase instance is ACTIVE, the
 # tool zip is uploaded and the agent image is pushed. Placeholders are filled by
-# the wrapper: <ACCOUNT_ID>, <AWS_REGION>, <CLUSTER_NAME> and <BEDROCK_MODEL_ID>
-# by render() (scripts/common.sh); "<FOUNDATION_MODEL_ARNS>" by the same sed
-# setup.sh:212 uses, from bedrock get-inference-profile (a read); <TOOL_CODE_KEY>
+# the wrapper: <ACCOUNT_ID>, <AWS_REGION>, <CLUSTER_NAME>, <BEDROCK_MODEL_ID>
+# and <BIFROST_NAMESPACE> by render() (scripts/common.sh); <TOOL_CODE_KEY>
 # and <TOOL_CODE_SHA256> from the zip it uploaded (the key, and
 # `openssl dgst -sha256 -binary <zip> | base64`).
 apiVersion: kro.run/v1alpha1
@@ -16,7 +15,7 @@ spec:
   region: <AWS_REGION>
   clusterName: <CLUSTER_NAME>
   inferenceProfileARN: arn:aws:bedrock:<AWS_REGION>:<ACCOUNT_ID>:inference-profile/<BEDROCK_MODEL_ID>
-  foundationModelARNs: ["<FOUNDATION_MODEL_ARNS>"]
+  bifrostNamespace: <BIFROST_NAMESPACE>
   toolCodeKey: <TOOL_CODE_KEY>
   toolCodeSHA256: "<TOOL_CODE_SHA256>"
   # The text of agent/prompt.txt.

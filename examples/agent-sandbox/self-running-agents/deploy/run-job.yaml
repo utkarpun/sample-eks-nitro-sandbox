@@ -40,11 +40,14 @@ spec:
             - { name: RUN_BUCKET, value: "<RUN_BUCKET>" }
             - { name: AWS_REGION, value: "<AWS_REGION>" }
             - { name: AWS_S3_US_EAST_1_REGIONAL_ENDPOINT, value: "regional" }
-            - { name: CLAUDE_CODE_USE_BEDROCK, value: "1" }
-            - { name: ANTHROPIC_MODEL, value: "<BEDROCK_MODEL_ID>" }
-            # Claude Code's background model uses the same profile, so the role's
-            # one-profile scope holds for it too.
-            - { name: ANTHROPIC_DEFAULT_HAIKU_MODEL, value: "<BEDROCK_MODEL_ID>" }
+            # The model calls go to Bifrost (bifrost/), which calls Bedrock with its own
+            # role; the agent's role has no Bedrock permission. The key is read by
+            # agent/settings.json's apiKeyHelper from the vk volume.
+            - { name: ANTHROPIC_BASE_URL, value: "http://bifrost.<BIFROST_NAMESPACE>.svc.cluster.local:8080/anthropic" }
+            - { name: ANTHROPIC_MODEL, value: "bedrock/<BEDROCK_MODEL_ID>" }
+            # Claude Code's background model uses the same model, the only one the
+            # agent's key may call.
+            - { name: ANTHROPIC_DEFAULT_HAIKU_MODEL, value: "bedrock/<BEDROCK_MODEL_ID>" }
             - { name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, value: "1" }
             - { name: DISABLE_TELEMETRY, value: "1" }
           securityContext:
@@ -59,8 +62,11 @@ spec:
             - { name: home, mountPath: /home/node }
             - { name: work, mountPath: /work }
             - { name: tmp, mountPath: /tmp }
+            - { name: vk, mountPath: /vk, readOnly: true }
       volumes:
         - { name: cfg, configMap: { name: agent-config } }
         - { name: home, emptyDir: {} }
         - { name: work, emptyDir: {} }
         - { name: tmp, emptyDir: {} }
+        # The agent's Bifrost key, which bifrost/apply.sh copies into this namespace.
+        - { name: vk, secret: { secretName: bifrost-agent-key, defaultMode: 0440 } }

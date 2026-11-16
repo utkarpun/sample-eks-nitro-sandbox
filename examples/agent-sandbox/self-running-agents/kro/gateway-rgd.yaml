@@ -32,10 +32,13 @@ spec:
       accountID: string | required=true
       region: string | required=true
       clusterName: string | required=true
-      # The Bedrock inference profile the agent uses and the foundation models it
-      # routes to (setup.sh:208-209 reads them; the wrapper passes them in).
+      # The Bedrock inference profile the agent's model calls use, through Bifrost.
+      # The agent role gets no permission on it; run.sh and test.sh read the model
+      # id back from it.
       inferenceProfileARN: string | required=true
-      foundationModelARNs: "[]string | required=true"
+      # The namespace Bifrost runs in (bifrost/), the one place the agent's
+      # egress rule lets its model calls go.
+      bifrostNamespace: string | default="bfx"
       # The tool zip the wrapper uploaded to the run bucket, and the base64
       # SHA-256 of it (Lambda's CodeSha256 form). A new hash is how ACK learns
       # the code changed and calls UpdateFunctionCode
@@ -299,11 +302,10 @@ spec:
           assumeRolePolicyDocument: |
             {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"],"Condition":{"StringEquals":{"aws:SourceAccount":"${schema.spec.accountID}","aws:RequestTag/eks-cluster-arn":"arn:aws:eks:${schema.spec.region}:${schema.spec.accountID}:cluster/${schema.spec.clusterName}","aws:RequestTag/kubernetes-namespace":"${schema.spec.namespace}","aws:RequestTag/kubernetes-service-account":"agent"}}}]}
           inlinePolicies:
-            # json.marshal, because the foundation model ARNs are a list.
+            # No Bedrock statement: the agent's model calls go through Bifrost, whose
+            # own role holds that permission.
             self-running-agents: >-
               ${json.marshal({"Version": "2012-10-17", "Statement": [
-              {"Sid": "InvokeTheOneInferenceProfileTheAgentUses", "Effect": "Allow", "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"], "Resource": schema.spec.inferenceProfileARN},
-              {"Sid": "InvokeTheFoundationModelsThatProfileRoutesTo", "Effect": "Allow", "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"], "Resource": schema.spec.foundationModelARNs},
               {"Sid": "CallTheOneGateway", "Effect": "Allow", "Action": "bedrock-agentcore:InvokeGateway", "Resource": gateway.status.ackResourceMetadata.arn},
               {"Sid": "StoreRunOutputOnly", "Effect": "Allow", "Action": "s3:PutObject", "Resource": "arn:aws:s3:::" + schema.spec.prefix + "-runs-" + schema.spec.accountID + "-" + schema.spec.region + "/runs/*"}
               ]})}
@@ -358,9 +360,11 @@ spec:
             # The EKS Pod Identity agent on the node, where the pod's credentials come from.
             - to: [ { ipBlock: { cidr: 169.254.170.23/32 } } ]
               ports: [ { protocol: TCP, port: 80 } ]
+            # Bifrost, the model gateway: its pods only, on its one port.
+            - to: [ { namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: "${schema.spec.bifrostNamespace}" } }, podSelector: { matchLabels: { app.kubernetes.io/name: bifrost } } } ]
+              ports: [ { protocol: TCP, port: 8080 } ]
             - to:
                 - domainNames:
-                    - bedrock-runtime.${schema.spec.region}.amazonaws.com
                     - ${url(gateway.status.gatewayURL).getHostname()}
                     - ${schema.spec.prefix}-runs-${schema.spec.accountID}-${schema.spec.region}.s3.${schema.spec.region}.amazonaws.com
               ports: [ { protocol: TCP, port: 443 } ]

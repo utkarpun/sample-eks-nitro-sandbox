@@ -94,10 +94,7 @@ else
 fi
 
 step "4/4 the SraGateway instance"
-FM_ARNS="$(aws bedrock get-inference-profile --inference-profile-identifier "$BEDROCK_MODEL_ID" \
-  --query 'models[].modelArn' --output text | tr '\t' '\n' | sed 's/.*/"&"/' | paste -sd, -)"
-[[ -n "$FM_ARNS" ]] || die "could not read the foundation models behind $BEDROCK_MODEL_ID"
-render_instance "$K/gateway.yaml" -e "s|\"<FOUNDATION_MODEL_ARNS>\"|$FM_ARNS|g" \
+render_instance "$K/gateway.yaml" \
   -e "s|<TOOL_CODE_KEY>|$CODE_KEY|g" -e "s|<TOOL_CODE_SHA256>|$CODE_SHA256|g" > "$WORK/gateway.yaml"
 kc_cluster apply -f "$WORK/gateway.yaml"
 wait_active sragateway 900

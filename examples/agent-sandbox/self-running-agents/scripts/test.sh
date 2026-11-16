@@ -3,11 +3,14 @@
 # refusal for each thing that is meant to refuse. Each check reads PASS or FAIL
 # from the run's own output, and the raw output is kept in LOG_DIR.
 #
-#   T    the agent's get_time call was answered without error, and its final answer has the time-in-utc: form with the time the tool returned
+#   T    the agent's get_time call was answered without error, and its final answer has the time-in-utc: form with the time the tool returned;
+#        the agent has no Bedrock permission and no bedrock-runtime egress, so a pass also shows its model calls went through Bifrost (T-B1)
 #   T2   outside the model, the gateway lists only get_time for the agent's role and answers it
 #   NC1  in the T run, the egress gate's connections to a host the egress rule does not name failed
 #   NC2  a call to get_host_info, which the Cedar policy does not permit, is refused by the gateway
 #   NC4  the egress gate stops a run when its canary host is reachable
+#   NC-B1 the agent cannot call Bedrock itself: its role may not invoke the model (Bifrost's role, the control, may),
+#        and a run whose canary is bedrock-runtime finds it unreachable
 #   NC3  admission refuses a pod that automounts the service-account token, and accepts one that does not
 source "$(dirname "$0")/common.sh" || exit 1
 load_status   # the namespace (NC3) and Region (NC4), from the instances
@@ -78,12 +81,32 @@ grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run'
 line="$(grep -E "^sra: egress gate: ${EGRESS_CANARY:-example.com}:443 failed to connect 3 times" "$LOG_DIR/T.log")"
 verdict NC1 $? "${line:-no gate line in T.log}"
 
-# NC4: the egress gate stops a run when its canary answers. Pointed at a host the rule does allow, it
-# never sees a connection fail, so the run must stop before the tool call it was given.
-EGRESS_CANARY="bedrock-runtime.$AWS_REGION.amazonaws.com" "$HERE/run.sh" tools "${TARGET}___get_time" > "$LOG_DIR/NC4.log" 2>&1; nrc=$?
+# NC4: the egress gate stops a run when its canary answers. Pointed at a host the rule does allow (the
+# run bucket's), it never sees a connection fail, so the run must stop before the tool call it was given.
+EGRESS_CANARY="$RUN_BUCKET.s3.$AWS_REGION.amazonaws.com" "$HERE/run.sh" tools "${TARGET}___get_time" > "$LOG_DIR/NC4.log" 2>&1; nrc=$?
 line="$(grep -E '^sra: egress gate: ' "$LOG_DIR/NC4.log" | tr '\n' ' ')"
 [[ $nrc -ne 0 ]] && grep -q 'still reachable' "$LOG_DIR/NC4.log" && ! grep -q '"listed"' "$LOG_DIR/NC4.log"
 verdict NC4 $? "${line:-no gate line} run rc=$nrc"
+
+# NC-B1: the agent cannot reach Bedrock without Bifrost, at two layers. IAM, which holds on any node: the
+# agent role may not invoke the model's inference profile, and Bifrost's role may (the control). Network:
+# a run whose canary is bedrock-runtime goes on, since the egress rule no longer names it; NC4 is its
+# control. On EKS Auto Mode an allow learned for one pod is shared with every pod on its node, so on a node
+# that also runs Bifrost the network leg can read FAIL while the IAM leg still holds.
+resolve_account
+BIFROST_ROLE=bfx-bifrost   # bifrost/rgd.yaml names it ${prefix}-bifrost, prefix bfx (bifrost/lib.sh)
+sim() {
+  aws iam simulate-principal-policy --policy-source-arn "arn:aws:iam::$ACCOUNT_ID:role/$1" \
+    --action-names bedrock:InvokeModel bedrock:InvokeModelWithResponseStream \
+    --resource-arns "arn:aws:bedrock:$AWS_REGION:$ACCOUNT_ID:inference-profile/$BEDROCK_MODEL_ID" \
+    --query 'EvaluationResults[].EvalDecision' --output text 2>&1 | tr '\t\n' '  ' | sed 's/ *$//'
+}
+a="$(sim "$PREFIX-agent")"; b="$(sim "$BIFROST_ROLE")"
+EGRESS_CANARY="bedrock-runtime.$AWS_REGION.amazonaws.com" "$HERE/run.sh" tools "${TARGET}___get_time" > "$LOG_DIR/NC-B1.log" 2>&1; brc=$?
+line="$(grep -E '^sra: egress gate: ' "$LOG_DIR/NC-B1.log" | tr '\n' ' ')"
+printf 'agent role: %s\nbifrost role: %s\n' "$a" "$b" >> "$LOG_DIR/NC-B1.log"
+r=1; [[ "$a" == "implicitDeny implicitDeny" && "$b" == "allowed allowed" && $brc -eq 0 && "$line" == *"failed to connect 3 times"* ]] && r=0
+verdict NC-B1 $r "agent role: $a; $BIFROST_ROLE role: $b; ${line:-no gate line} run rc=$brc"
 
 # NC3: server-side dry runs, so nothing is created. The positive control is the
 # same pod with the token turned off.

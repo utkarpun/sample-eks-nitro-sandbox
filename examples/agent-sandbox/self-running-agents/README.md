@@ -18,14 +18,16 @@ objects are two kro graphs (`kro/`), whose AWS objects the AWS Controllers for K
 (`bootstrap/`) turns on. The scripts only apply the graphs, wait, upload the tool's code and
 push the agent image, run, check and delete.
 
-This is phase A of the blueprint: the tool door. The agent calls Amazon Bedrock directly
-for its model, with one inference profile. A later phase puts Bifrost, an in-cluster model
-gateway, in front of Bedrock.
+The agent's model calls go to [Bifrost](bifrost/README.md), an in-cluster model gateway
+that calls Amazon Bedrock with a role of its own; the agent's role has no Bedrock
+permission. Bifrost is set up after the sample (Step 2b).
 
-Beyond the cluster, a run costs the Bedrock tokens the agent spends, the gateway's tool
+Beyond the cluster, a run costs the Bedrock tokens the agent spends through Bifrost, the gateway's tool
 calls, one Lambda invocation per tool call, and the node EKS Auto Mode launches for the
 sandbox pod when no node has room (the pod requests 1 vCPU and 2Gi), which EKS Auto Mode removes once it is empty. Between runs you
-pay for the image in ECR and the objects in the run bucket; `cleanup.sh` removes both.
+pay for the image in ECR and the objects in the run bucket, which `cleanup.sh` removes, and
+for Bifrost's PostgreSQL database on Amazon RDS, which bills until `bifrost/destroy.sh` ends
+with `clean up complete` ([what it costs](bifrost/README.md#what-it-costs)).
 
 ```bash
 git clone -b self-running-agents https://github.com/utkarpun/sample-eks-nitro-sandbox.git
@@ -46,11 +48,13 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
   `kubectl` within one minor version of the cluster, `python3` and `sha256sum` on your path.
 - Credentials that may, for Step 0, create an IAM role and its inline policy, EKS
   capabilities and an access policy association, and a ClusterRole and its binding on the
-  cluster; and for the scripts, read the cluster and the Bedrock inference profile, push to
-  the sample's ECR repository, put and delete objects in its run bucket, and apply kro
-  graphs and instances. Every other AWS resource is created by the ACK capability's role.
+  cluster; and for the scripts, read the cluster, push to the sample's ECR repository, put
+  and delete objects in its run bucket, apply kro graphs and instances, and for `test.sh`
+  simulate the agent's and Bifrost's IAM roles (`iam:SimulatePrincipalPolicy`). Every other
+  AWS resource is created by the ACK capability's role.
 - Access to the Bedrock model named in `.env`, and AgentCore Gateway and AgentCore Policy in
   your Region (this run used `us-west-2`).
+- What [Bifrost](bifrost/README.md#before-you-start) needs as well: `helm` 3 and `openssl`.
 
 ## Overview
 
@@ -61,6 +65,7 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 | The tool door | An AgentCore Gateway, MCP protocol, inbound auth `AWS_IAM` | AWS, managed |
 | The policy | A Cedar policy engine in `ENFORCE` mode on the gateway, with one `permit` | AWS, managed |
 | The tool | A Lambda function with two read-only tools, `get_time` and `get_host_info` | AWS Lambda |
+| The model gateway | Bifrost, which calls Bedrock with its own role for requests that carry the agent's key | A Deployment in the namespace `bfx` ([bifrost/](bifrost/README.md)) |
 | The run's state | `runs/<run id>/` in a run bucket | Amazon S3 |
 | The infrastructure | Two kro graphs, `SraBase` and `SraGateway`, over ACK | The EKS managed kro and ACK capabilities |
 
@@ -79,9 +84,9 @@ A run goes like this:
 ### Design
 
 **Identity.** The pod's ServiceAccount maps to one IAM role through EKS Pod Identity. That
-role may invoke the one inference profile and the foundation models it routes to, call
-`bedrock-agentcore:InvokeGateway` on the one gateway, and put objects under `runs/` in the
-run bucket. It holds nothing else. This follows the EKS Best Practices Guide's "Use one IAM
+role may call `bedrock-agentcore:InvokeGateway` on the one gateway and put objects under
+`runs/` in the run bucket. It holds nothing else, no Bedrock permission included: the model
+calls go through Bifrost, whose own role holds it. This follows the EKS Best Practices Guide's "Use one IAM
 role per application" (`latest/bpg/security/iam.adoc:1078-1084` at
 `aws/aws-eks-best-practices` `edc514fac86518b50129401c0cffd1f7981d7ec5`). The role trusts
 only Pod Identity sessions tagged with this cluster, this namespace and the `agent`
@@ -115,8 +120,8 @@ not run in `isolated-sandbox`.
 
 **Egress.** An `ApplicationNetworkPolicy` (the `egress` resource in `kro/gateway-rgd.yaml`)
 selects the agent pods, which isolates them, and allows DNS, the Pod Identity agent at
-`169.254.170.23:80`, and TCP 443 to three names only: `bedrock-runtime.<Region>.amazonaws.com`,
-the gateway's host, and the run bucket's host. The EKS Best Practices Guide starts from a
+`169.254.170.23:80`, Bifrost's pods (`app.kubernetes.io/name: bifrost` in `bfx`) on TCP 8080,
+and TCP 443 to two names only: the gateway's host and the run bucket's host. The EKS Best Practices Guide starts from a
 deny-all policy for every pod in the namespace (`podSelector: {}`,
 `latest/bpg/security/network.adoc:71-90`, same commit); this rule applies that deny to the
 agent pods only, with the allows layered on. Other pods in the namespace are not covered.
@@ -197,9 +202,11 @@ NodeClass's `networkPolicy: DefaultDeny` (the field the EKS Best Practices Guide
 the EKS NodeClass specification, and the VPC CNI documents the same deny-until-configured
 behavior as strict mode). Not exercised by this sample.
 
-**The model call.** The agent reaches Bedrock directly with its own role. Nothing in this
-blueprint sits between the agent and Bedrock in this phase: no per-run budget and no
-inspection of prompts or tool results. Bedrock still records the calls on its side:
+**The model call.** The agent sends its model calls to Bifrost with its key, which
+`agent/settings.json`'s `apiKeyHelper` reads from the Secret `bifrost-agent-key`, and Bifrost
+calls Bedrock as its own role. The key is limited to one model and a request and token rate,
+with no spend budget ([Stop it](bifrost/README.md#stop-it)); nothing inspects prompts or
+tool results. Bedrock still records the calls on its side, as Bifrost's role:
 CloudTrail logs each `InvokeModel` call as a management event, CloudWatch counts
 invocations and tokens per model (`AWS/Bedrock`), and model invocation logging, if you turn
 it on, keeps the request and response bodies.
@@ -237,11 +244,11 @@ included ([Pod Identity and credentials](https://docs.aws.amazon.com/eks/latest/
 A sandbox Cedar policy generated with `--deny-imds` turns it off; generate it with
 `--with-pod-identity` as well, or the pod's AWS calls fail.
 
-**The role works without the gateway.** The pod's AWS credentials reach Bedrock and the run
-bucket directly; only tool calls pass the gateway's policy. No remedy in this sample beyond
+**The role works without the gateway.** The pod's AWS credentials reach the run bucket
+directly; only tool calls pass the gateway's policy. No remedy in this sample beyond
 the role's narrow scope.
 
-**Every allowed name is a public endpoint.** AgentCore Gateway, Bedrock and S3 each have
+**Every allowed name is a public endpoint.** AgentCore Gateway, S3 and, for Bifrost, Bedrock each have
 interface VPC endpoints (the gateway's is `com.amazonaws.<Region>.bedrock-agentcore.gateway`);
 with them the pods need no route to the internet. This sample uses the public endpoints.
 
@@ -269,12 +276,13 @@ with them the pods need no route to the internet. This sample uses the public en
 | `kro/NOTES.md` | Which setup step each graph resource replaced, and the CRD fields checked |
 | `Dockerfile`, `.dockerignore` | The agent image: Claude Code, the bridge, and `agent/` |
 | `agent/run.sh` | Runs in the pod: egress gate, then the agent or a tool listing, then stores the output |
-| `agent/settings.json` | Built-in tools are off (`--tools ""` in agent/run.sh); settings.json allows only `mcp__gateway` |
+| `agent/settings.json` | Built-in tools are off (`--tools ""` in agent/run.sh); settings.json allows only `mcp__gateway`, and its `apiKeyHelper` reads the Bifrost key |
 | `agent/claude.json` | Marks `/work` trusted so a headless run does not stop at the trust prompt |
 | `agent/prompt.txt` | The prompt's text; `kro/gateway.yaml` carries the copy a run uses |
 | `agent/mcp_call.py` | Lists and calls the gateway's tools with no model in the loop |
 | `tool/handler.py` | The Lambda function behind the gateway target |
-| `deploy/run-job.yaml` | One run's Job |
+| `deploy/run-job.yaml` | One run's Job, its model calls pointed at Bifrost |
+| `bifrost/` | Bifrost, the model gateway, with its own apply, test and destroy ([README](bifrost/README.md)) |
 | `scripts/setup.sh`, `run.sh`, `test.sh`, `cleanup.sh` | Apply, run, check and remove; `common.sh` is shared |
 
 ## Run it
@@ -288,7 +296,7 @@ on the pod's own lines is fixed in `agent/run.sh`.
 **Step 0: turn on kro and ACK.** Once per cluster. The stack makes one IAM role for both
 capabilities, the ACK and kro capabilities, a Secret reader access policy in the namespaces
 `secret_namespaces` names, and a ClusterRole that lets kro manage the ACK kinds the graphs
-use. Its `rds_prefix` and RDS statements are for the next phase (Bifrost); they create
+use. Its `rds_prefix` and RDS statements are for [Bifrost](bifrost/README.md); they create
 nothing on their own.
 
 ```bash
@@ -333,6 +341,14 @@ that its `SraBase` instance did not make. If it stops part way, run it again.
 TODO: output from the fresh run
 ```
 
+**Step 2b: set up Bifrost.** Follow [Bifrost's README](bifrost/README.md). `bifrost/apply.sh`
+needs the namespace `sra` that `setup.sh` made, and copies the agent's key into it;
+`run.sh` and `test.sh` stop until that key is there.
+
+```bash
+./bifrost/apply.sh
+```
+
 **Step 3: start one agent run.** (The output below is from the agent run `test.sh` starts
 as its first check, T, in Step 4; `run.sh` prints the same.) The agent reads the time
 through the gateway and reports it. The pod has no Kubernetes API token, and waits for its
@@ -365,7 +381,7 @@ TODO: output from the fresh run
 ```
 
 NC1 reads the gate line of T's own run, so it passes whenever T's run stopped at the gate;
-the six checks are five independent outcomes.
+the seven checks are six independent outcomes.
 
 Not covered by these checks: callers other than the agent role, hosts other than
 example.com, a pod without the agent label, a pod without
@@ -381,7 +397,13 @@ example.com, a pod without the agent label, a pod without
   ```
 
 - **NC4** shows the gate stops a run when its canary answers: pointed at a host the rule
-  does allow, the run stops before its tool call.
+  does allow (the run bucket's), the run stops before its tool call.
+- **NC-B1** shows the agent cannot call Bedrock itself. IAM: a simulation of the agent's
+  role on the model's inference profile reads `implicitDeny`, and the same on Bifrost's role
+  reads `allowed`. Network: a run whose canary is `bedrock-runtime.<Region>.amazonaws.com`
+  finds it unreachable and goes on. On EKS Auto Mode an allow learned for one pod is shared
+  with every pod on its node, so on a node that also runs Bifrost the network leg can fail
+  while the IAM leg holds.
 
 <a id="step-5"></a>
 **Step 5: the window the egress gate is for.** This block is from a separate, earlier run
@@ -441,7 +463,11 @@ the agent a tool that runs code or opens a connection.
 
 ## Clean up
 
+Bifrost first, which removes its key from `sra` and its database
+([Bifrost's clean up](bifrost/README.md#clean-up)), then the sample:
+
 ```bash
+./bifrost/destroy.sh
 ./scripts/cleanup.sh
 ```
 
@@ -450,7 +476,7 @@ TODO: output from the fresh run
 ```
 
 Then, only if nothing else on the cluster uses the kro and ACK capabilities (another
-sample's graphs, or the next phase's), remove them:
+sample's graphs, or Bifrost's), remove them:
 
 ```bash
 cd bootstrap

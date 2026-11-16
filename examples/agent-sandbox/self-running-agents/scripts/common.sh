@@ -15,6 +15,7 @@ TARGET=clock                # the gateway target; its tools are clock___<tool>
 PREFIX=sra
 NAMESPACE=sra
 INSTANCE=sra
+BIFROST_NAMESPACE=bfx       # where bifrost/ runs the model gateway (bifrost/lib.sh)
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAMPLE_DIR="$(cd "$HERE/.." && pwd)"
@@ -148,6 +149,9 @@ load_status() {
     || die "SraBase reads '${st:-<none>}' and SraGateway '${gst:-<none>}', not both ACTIVE; run ./scripts/setup.sh"
   [[ -n "$NAMESPACE" && -n "$RUN_BUCKET" && -n "$REPOSITORY_URI" && -n "$BEDROCK_MODEL_ID" ]] \
     || die "an instance status field is empty; run ./scripts/setup.sh"
+  # A run's model calls need the key bifrost/apply.sh puts here (deploy/run-job.yaml).
+  resource_exists kc secret bifrost-agent-key \
+    || die "Secret $NAMESPACE/bifrost-agent-key is missing or unreadable; run ./bifrost/apply.sh first"
 }
 
 # wait_active <kind> <seconds>: wait for the instance's state ACTIVE; on a
@@ -216,5 +220,6 @@ render() {
   local f=$1; shift
   sed -e "s|<NAMESPACE>|$NAMESPACE|g" -e "s|<AWS_REGION>|$AWS_REGION|g" \
       -e "s|<RUN_BUCKET>|${RUN_BUCKET:-}|g" -e "s|<BEDROCK_MODEL_ID>|$BEDROCK_MODEL_ID|g" \
-      -e "s|<ACCOUNT_ID>|${ACCOUNT_ID:-}|g" -e "s|<CLUSTER_NAME>|${CLUSTER_NAME:-}|g" "$@" "$f"
+      -e "s|<ACCOUNT_ID>|${ACCOUNT_ID:-}|g" -e "s|<CLUSTER_NAME>|${CLUSTER_NAME:-}|g" \
+      -e "s|<BIFROST_NAMESPACE>|$BIFROST_NAMESPACE|g" "$@" "$f"
 }

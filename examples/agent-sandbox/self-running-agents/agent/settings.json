@@ -1,4 +1,5 @@
 {
+  "apiKeyHelper": "cat /vk/key",
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": [
