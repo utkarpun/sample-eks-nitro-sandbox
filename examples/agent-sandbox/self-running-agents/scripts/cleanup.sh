@@ -35,7 +35,7 @@ delete_instance() {
   kc_cluster delete "$1" "$INSTANCE" --wait=true --timeout="$2s" || true
   rc=0; instance_gone "$1" || rc=$?
   [[ $rc -eq 0 ]] && { echo "  $1 $INSTANCE is gone"; return 0; }
-  fail "$1 $INSTANCE is still there after $2 s, or could not be read (kubectl get $1 $INSTANCE -o yaml shows why)"
+  fail "$1 $INSTANCE is still there after $2 s, or could not be read (kubectl$CTX_ARG get $1 $INSTANCE -o yaml shows why)"
   return 1
 }
 

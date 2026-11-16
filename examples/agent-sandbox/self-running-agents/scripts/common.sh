@@ -52,6 +52,7 @@ AWS_REGION="${AWS_REGION:-us-west-2}"
 export AWS_REGION
 if [[ -n "${AWS_PROFILE:-}" ]]; then export AWS_PROFILE; else unset AWS_PROFILE; fi
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
+CTX_ARG="${KUBE_CONTEXT:+ --context $KUBE_CONTEXT}"   # names the pinned context in kubectl commands printed for the reader
 BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-us.anthropic.claude-sonnet-5-5}"
 PROJECT_TAG="${PROJECT_TAG:-self-running-agents}"   # the Project tag on every AWS resource
 KUBECTL="${KUBECTL:-kubectl}"
@@ -126,14 +127,14 @@ require_network_policy_enforcement() {
   resource_exists kc_cluster -n kube-system configmap amazon-vpc-cni || cm=$?
   case $cm in
     1) die "network policy enforcement is off on context ${KUBE_CONTEXT:-$(kc_cluster config current-context 2>/dev/null || echo '<none>')} (there is no amazon-vpc-cni ConfigMap in kube-system). $off
-  kubectl -n kube-system create configmap amazon-vpc-cni --from-literal=enable-network-policy-controller=true" ;;
+  kubectl$CTX_ARG -n kube-system create configmap amazon-vpc-cni --from-literal=enable-network-policy-controller=true" ;;
     2) die "could not read the amazon-vpc-cni ConfigMap in kube-system, so whether network policy enforcement is on could not be determined" ;;
   esac
   v="$(kc_cluster -n kube-system get configmap amazon-vpc-cni \
     -o jsonpath='{.data.enable-network-policy-controller}' 2>/dev/null)" || rc=$?
   [[ $rc -ne 0 ]] && die "could not read the amazon-vpc-cni ConfigMap in kube-system, so whether network policy enforcement is on could not be determined"
   [[ "$v" == "true" ]] || die "network policy enforcement is off on context ${KUBE_CONTEXT:-$(kc_cluster config current-context 2>/dev/null || echo '<none>')} (enable-network-policy-controller is '${v:-<unset>}'). $off
-  kubectl -n kube-system patch configmap amazon-vpc-cni --type merge -p '{\"data\":{\"enable-network-policy-controller\":\"true\"}}'"
+  kubectl$CTX_ARG -n kube-system patch configmap amazon-vpc-cni --type merge -p '{\"data\":{\"enable-network-policy-controller\":\"true\"}}'"
   resource_exists kc_cluster crd applicationnetworkpolicies.networking.k8s.aws || crd=$?
   case $crd in
     1) die "the ApplicationNetworkPolicy CRD is not on this cluster, so the agent's egress rule cannot be applied. This sample needs EKS Auto Mode." ;;

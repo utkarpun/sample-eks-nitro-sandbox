@@ -70,19 +70,19 @@ kb create configmap bifrost-pricing \
 # 5. The graph definition, then this cluster's instance of it.
 kc_cluster apply -f "$BF_DIR/rgd.yaml" >/dev/null
 kc_cluster wait --for=jsonpath='{.status.state}'=Active rgd/bifrost-backend --timeout=120s >/dev/null \
-  || die "kro did not accept rgd.yaml: kubectl get rgd bifrost-backend -o yaml"
+  || die "kro did not accept rgd.yaml: kubectl$CTX_ARG get rgd bifrost-backend -o yaml"
 subnet_list="$(printf '"%s",' ${SUBNETS//,/ })"
 render "$BF_DIR/instance.yaml" -e "s|<VPC_ID>|$VPC_ID|g" -e "s|<VPC_CIDR>|$VPC_CIDR|g" \
   -e "s|<SUBNET_IDS>|${subnet_list%,}|g" -e "s|<FOUNDATION_MODEL_ID>|${BEDROCK_MODEL_ID#*.}|g" > "$work/instance.yaml"
 kb apply -f "$work/instance.yaml" >/dev/null
 echo "waiting for the graph (the RDS instance is most of the wait)"
 kb wait --for=jsonpath='{.status.state}'=ACTIVE bifrostbackend/bifrost --timeout=1200s >/dev/null \
-  || die "the graph is not ACTIVE: kubectl -n $BIFROST_NAMESPACE get bifrostbackend bifrost -o yaml"
+  || die "the graph is not ACTIVE: kubectl$CTX_ARG -n $BIFROST_NAMESPACE get bifrostbackend bifrost -o yaml"
 echo "database $(kb get bifrostbackend bifrost -o jsonpath='{.status.dbHost}')"
 
 # 6. Bifrost itself, from the official chart, with the Region and model filled in.
 render "$BF_DIR/values.yaml" > "$work/values.yaml"
 hc upgrade --install bifrost bifrost --repo "$CHART_REPO" --version "$CHART_VERSION" \
   -n "$BIFROST_NAMESPACE" -f "$work/values.yaml" --wait --timeout 10m >/dev/null \
-  || die "the Bifrost release did not become ready: kubectl -n $BIFROST_NAMESPACE get pods"
+  || die "the Bifrost release did not become ready: kubectl$CTX_ARG -n $BIFROST_NAMESPACE get pods"
 echo "bifrost is up: http://bifrost.$BIFROST_NAMESPACE.svc.cluster.local:8080"
