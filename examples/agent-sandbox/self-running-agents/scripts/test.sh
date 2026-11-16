@@ -74,7 +74,7 @@ while read -r name code rest; do verdict "$name" "$code" "$rest"; done < <(grep 
 grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run's output: $(tail -3 "$LOG_DIR/tools.log" | tr '\n' ' ')"
 
 # NC1: a host the egress rule does not name, read from the T run's egress gate line.
-line="$(grep -E '^sra: egress gate: example.com:443 failed to connect 3 times' "$LOG_DIR/T.log")"
+line="$(grep -E "^sra: egress gate: ${EGRESS_CANARY:-example.com}:443 failed to connect 3 times" "$LOG_DIR/T.log")"
 verdict NC1 $? "${line:-no gate line in T.log}"
 
 # NC4: the egress gate fails closed. Pointed at a host the rule does allow, it

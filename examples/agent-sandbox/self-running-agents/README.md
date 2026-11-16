@@ -99,8 +99,10 @@ pod in the namespace that does not turn it off or does not run in `isolated-sand
 **Egress.** An `ApplicationNetworkPolicy` (`deploy/egress.yaml`) selects the agent pods,
 which isolates them, and allows DNS, the Pod Identity agent at `169.254.170.23:80`, and
 TCP 443 to three names only: `bedrock-runtime.<Region>.amazonaws.com`, the gateway's host,
-and the run bucket's host. This is the EKS Best Practices Guide's default-deny start
-(`latest/bpg/security/network.adoc:71-76`, same commit), with the allows layered on.
+and the run bucket's host. The EKS Best Practices Guide starts from a deny-all policy for
+every pod in the namespace (`podSelector: {}`, `latest/bpg/security/network.adoc:71-90`,
+same commit); this rule applies that deny to the agent pods only, with the allows layered
+on. Other pods in the namespace are not covered.
 The run is a plain Job with the `isolated-sandbox` runtime class, not an agent-sandbox
 `SandboxTemplate`, so no controller adds a network policy of its own. Network policies add
 up: on a template, the controller's default policy would open what this rule closes, so
@@ -116,13 +118,16 @@ nothing until a connection to a host the rule does not name (`example.com`, or
 after 90 s. Any failure to connect counts (refused, unreachable, timed out or not
 resolvable), so the gate only means something when the canary is reachable before the rule
 applies: on a cluster with no internet path, set `EGRESS_CANARY` to a host the pod can
-otherwise reach.
+otherwise reach, with `export EGRESS_CANARY=<host>` in your shell before you run
+`run.sh` or `test.sh` (it is not read from `.env`).
 
 **State outside the pod.** The pod's filesystem is read-only apart from three `emptyDir`
 volumes. The run's output goes to standard output, which `run.sh` streams as it happens
 (on this cluster EKS Auto Mode removed a node after a Job's pod finished and its logs went
-with it, step 1 E16), and to `s3://<run bucket>/runs/<run id>/` before the pod exits. A run
-may overwrite earlier runs' objects; turn on bucket versioning if the record matters. The
+with it), and to `s3://<run bucket>/runs/<run id>/` before the pod exits. A run may
+overwrite earlier runs' objects; turn on bucket versioning if the record matters, and
+empty the bucket in the S3 console first (Empty deletes every version), since `cleanup.sh`
+removes only current objects. The
 pod carries `karpenter.sh/do-not-disrupt`, because Auto Mode consolidation otherwise evicts
 a sandbox pod mid-run.
 
@@ -153,15 +158,17 @@ a credential can use every one of them, so close them before you add such a tool
 rule matches the addresses (the EKS guide: resolved IPs go into an eBPF map and egress is
 filtered by IP), not the name a client sends inside TLS. A host that shares an address with
 an allowed name is reachable too. On this cluster the learned addresses were shared by
-every pod on the node (step 1, E08), so a pod can reach a name another pod on the same node
+every pod on the node, so a pod can reach a name another pod on the same node
 is allowed. The run bucket's name is the clearest case: every S3 bucket in the Region is
 served from the same addresses, so the rule lets the pod reach any bucket. The role can
 write only under `runs/` in the run bucket, but public buckets are readable and writable
 without a role.
 
 **DNS is open.** Port 53 is allowed to any address. EKS documents a DNS filter for name
-rules, but on this cluster every name still resolved from an agent pod (step 1, E09), so
-treat DNS as a channel that can carry data out.
+rules, but on this cluster every name still resolved from an agent pod, so treat DNS
+as a channel that can carry data out. The EKS Best Practices Guide's example allows DNS only
+to `kube-dns` in `kube-system`, UDP 53 (`latest/bpg/security/network.adoc:100-129`, same
+commit); this rule is wider.
 
 **The window before the policy.** The egress gate keeps the agent from starting during it
 on a cluster where the canary is reachable, but the window exists for every pod in the
@@ -179,7 +186,7 @@ invocations and tokens per model (`AWS/Bedrock`), and model invocation logging, 
 it on, keeps the request and response bodies.
 
 **No in-guest policy.** An isolated sandbox runs no in-guest policy unless one is supplied;
-AWS documents in-guest Cedar for both modes, our step 1 test covered confidential mode only,
+AWS documents in-guest Cedar for both modes, our earlier test covered confidential mode only,
 and this sample supplies none. Image signing (AWS Signer) was tested only in confidential
 mode. The Cedar policy here is the gateway's, in AWS. It says nothing about what runs
 inside the pod.
@@ -187,8 +194,9 @@ inside the pod.
 **Admission checks two fields.** The policy refuses a pod that leaves the token automount
 on or runs outside `isolated-sandbox`. It does not refuse a privileged container, a
 `hostPath` volume, `hostNetwork`, a Secret in `env` or a token mounted on purpose as a
-projected volume, and an isolated sandbox does not refuse the first three either (our step 1
-run). Add those rules, or a policy engine, before anyone but you creates pods in the
+projected volume, and an isolated sandbox does not refuse the first two either; a
+`hostNetwork` pod fails to start in a sandbox (AWS's sandboxing considerations page). Add
+those rules, or a policy engine, before anyone but you creates pods in the
 namespace.
 
 **Only labelled pods are under the egress rule.** The rule selects
@@ -201,7 +209,8 @@ egress (`DefaultAllow` here). Keep `create pods` in the namespace to yourself.
 `169.254.169.254`, inside the sandbox, so the egress rule does not reach it. It serves only
 the Region, Availability Zone and partition, and 404 for everything else, credentials
 included ([Pod Identity and credentials](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-metadata-credentials.html)).
-A sandbox Cedar policy generated with `--deny-imds` turns it off.
+A sandbox Cedar policy generated with `--deny-imds` turns it off; generate it with
+`--with-pod-identity` as well, or the pod's AWS calls fail.
 
 **The role works without the gateway.** The pod's AWS credentials reach Bedrock and the run
 bucket directly; only tool calls pass the gateway's policy. No remedy in this sample beyond
@@ -355,6 +364,9 @@ checks: 6 PASS, 0 FAIL
 ```
 
 (Abridged: the T line's tool results and the NC3 message are cut where marked.)
+
+NC1 reads the gate line of T's own run, so it passes whenever T's run stopped at the gate;
+the six checks are five independent outcomes.
 
 Not covered by these checks: callers other than the agent role, hosts other than
 example.com, a pod without the agent label, a pod without
