@@ -1,0 +1,72 @@
+# One agent run. The Job exists for the run and is deleted after it; the pod
+# keeps nothing (agent/run.sh). Rendered by scripts/run.sh.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: <JOB_NAME>
+  namespace: <NAMESPACE>
+  labels: { app.kubernetes.io/name: agent, self-running-agents/run: "<RUN_ID>" }
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: agent, self-running-agents/run: "<RUN_ID>" }
+      annotations:
+        # A run has no retry (backoffLimit 0), so the node is pinned for its duration;
+        # EKS Auto Mode otherwise consolidates it mid-run (auto-cost-control.html).
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      runtimeClassName: isolated-sandbox
+      serviceAccountName: agent
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Never
+      nodeSelector: { kubernetes.io/arch: amd64 }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: agent
+          image: <IMAGE>
+          env:
+            - { name: RUN_ID, value: "<RUN_ID>" }
+            - { name: RUN_MODE, value: "<RUN_MODE>" }
+            - { name: PROBE_CALLS, value: "<PROBE_CALLS>" }
+            - { name: EGRESS_CANARY, value: "<EGRESS_CANARY>" }
+            - { name: RUN_BUCKET, value: "<RUN_BUCKET>" }
+            - { name: AWS_REGION, value: "<AWS_REGION>" }
+            - { name: AWS_S3_US_EAST_1_REGIONAL_ENDPOINT, value: "regional" }
+            # The model calls go to Bifrost (bifrost/), which calls Bedrock with its own
+            # role; the agent's role has no Bedrock permission. The key is read by
+            # agent/settings.json's apiKeyHelper from the vk volume.
+            - { name: ANTHROPIC_BASE_URL, value: "http://bifrost.<BIFROST_NAMESPACE>.svc.cluster.local:8080/anthropic" }
+            - { name: ANTHROPIC_MODEL, value: "bedrock/<BEDROCK_MODEL_ID>" }
+            # Claude Code's background model uses the same model, the only one the
+            # agent's key may call.
+            - { name: ANTHROPIC_DEFAULT_HAIKU_MODEL, value: "bedrock/<BEDROCK_MODEL_ID>" }
+            - { name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, value: "1" }
+            - { name: DISABLE_TELEMETRY, value: "1" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+            limits: { cpu: "1", memory: 2Gi }
+          volumeMounts:
+            - { name: cfg, mountPath: /cfg, readOnly: true }
+            - { name: home, mountPath: /home/node }
+            - { name: work, mountPath: /work }
+            - { name: tmp, mountPath: /tmp }
+            - { name: vk, mountPath: /vk, readOnly: true }
+      volumes:
+        - { name: cfg, configMap: { name: agent-config } }
+        - { name: home, emptyDir: {} }
+        - { name: work, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+        # The agent's Bifrost key, which bifrost/apply.sh copies into this namespace.
+        - { name: vk, secret: { secretName: bifrost-agent-key, defaultMode: 0440 } }

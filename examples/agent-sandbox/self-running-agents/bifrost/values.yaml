@@ -1,0 +1,119 @@
+# Values for the official Bifrost chart (helm-charts/bifrost 2.1.48, maximhq/bifrost
+# tag transports/v2.5.1). Only what differs from the chart's defaults, plus the
+# pins whose reason is given beside them. apply.sh fills in <AWS_REGION> and
+# <BEDROCK_MODEL_ID> (common.sh render) from the sample's .env.
+# Bifrost keeps its state in Postgres on RDS (rgd.yaml), so a new pod picks it up.
+# One replica: Bifrost OSS does not support several processes on one Postgres
+# database (docs/deployment-guides/runtime-contract.mdx:235).
+# No secret is written here: every one comes from a Secret apply.sh makes, and the
+# rendered config.json holds only env. references to them. The chart hands them to
+# the pod as environment variables, not files, which BPG advises against
+# (latest/bpg/security/data.adoc:194-196 @edc514fac "Use volume mounts instead of
+# environment variables"); the chart offers no file form for them.
+replicaCount: 1
+image:
+  # The multi-arch index (linux/amd64 and linux/arm64), so any node will do.
+  tag: "v2.5.1@sha256:5ec9873acaf1687556b6e4dd854b92b539d9debf87a5a683b66338648b84d3c8"
+fullnameOverride: bifrost
+# The ServiceAccount comes from rgd.yaml, with its Pod Identity association.
+serviceAccount:
+  create: false
+  name: bifrost
+# Auto Mode consolidation would otherwise move the one replica at any time (BPG
+# latest/bpg/autoscaling/karpenter.adoc:544-552 @edc514fac).
+podAnnotations:
+  karpenter.sh/do-not-disrupt: "true"
+# Non-root, read-only root filesystem, nothing extra (BPG latest/bpg/security/pods.adoc:530,
+# :764 @edc514fac); written out here, though some equal the chart's defaults.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+  runAsUser: 1000
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+# Requests equal to limits, so the pod is Guaranteed (BPG latest/bpg/security/pods.adoc:597,
+# :640-641 @edc514fac).
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { cpu: 250m, memory: 512Mi }
+# The root filesystem is read-only. Bifrost's entrypoint exits unless /app/data is
+# writable (transports/docker-entrypoint.sh:48-62), so it gets an emptyDir.
+volumes:
+  - { name: appdata, emptyDir: {} }
+  - { name: tmp, emptyDir: {} }
+  - { name: pricing, configMap: { name: bifrost-pricing } }
+volumeMounts:
+  - { name: appdata, mountPath: /app/data }
+  - { name: tmp, mountPath: /tmp }
+  - { name: pricing, mountPath: /app/pricing, readOnly: true }
+env:
+  # Off for the AWS SDK in this pod only (instance metadata itself stays on, BPG
+  # latest/bpg/security/iam.adoc:1024-1026 @edc514fac), so Bifrost's credentials
+  # come from Pod Identity and never from the node's role.
+  - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
+  - name: BIFROST_AGENT_VK
+    valueFrom: { secretKeyRef: { name: bifrost-agent-key, key: key } }
+storage:
+  mode: postgres
+  # The chart then writes no logs_store block, and Bifrost makes its default
+  # SQLite logs store in /app/data (lib/config.go:1365-1381). enableLogging: false
+  # below keeps the logging plugin, the store's only request writer, from loading.
+  logsStore: { enabled: false }
+postgresql:
+  external:
+    enabled: true
+    # Service bifrost-db (rgd.yaml) points at the RDS endpoint.
+    host: bifrost-db
+    # Encrypted; the server certificate is not verified (README, Why the state is in Postgres).
+    sslMode: require
+    existingSecret: bifrost-db
+bifrost:
+  # config.json wins on every start: what it names is put back as written and any
+  # row made only in the database for those sections is removed.
+  sourceOfTruth: "config.json"
+  encryptionKeySecret: { name: bifrost-encryption }
+  authConfig:
+    isEnabled: true
+    existingSecret: bifrost-admin
+  client:
+    # No request or answer is kept (server/plugins.go:275, :290).
+    enableLogging: false
+    # Every inference call needs a virtual key; written out, though it is the default.
+    enforceAuthOnInference: true
+  framework:
+    pricing:
+      # A local copy of the one model's entry, so Bifrost needs no egress for
+      # pricing (the defaults fetch https://getbifrost.ai/datasheet at start).
+      pricingUrl: "file:///app/pricing/pricing.json"
+      modelParametersUrl: "file:///app/pricing/model-parameters.json"
+      liveModelsSyncInterval: 0
+      # And none for the MCP server catalog (https://getbifrost.ai/mcp-library).
+      mcpLibrarySyncInterval: 0
+  providers:
+    bedrock:
+      keys:
+        # No access key: Bifrost uses the AWS SDK's default chain, which reads
+        # the Pod Identity credentials.
+        - id: bedrock-key-1
+          name: bedrock-key-1
+          bedrock_key_config: { region: <AWS_REGION> }
+          weight: 1
+          models: [<BEDROCK_MODEL_ID>]
+  governance:
+    rateLimits:
+      # Requests a minute, and tokens a day: 40,000,000, the agent role's daily
+      # token cap, a loop-breaker a normal run never reaches.
+      - { id: rl-agent, request_max_limit: 120, request_reset_duration: "1m",
+          token_max_limit: 40000000, token_reset_duration: "1d" }
+    virtualKeys:
+      - id: agent
+        name: agent
+        value: env.BIFROST_AGENT_VK
+        is_active: true
+        rate_limit_id: rl-agent
+        provider_configs:
+          - provider: bedrock
+            weight: 1
+            allowed_models: [<BEDROCK_MODEL_ID>]
+            key_ids: [bedrock-key-1]

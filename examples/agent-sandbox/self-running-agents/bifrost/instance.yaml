@@ -1,0 +1,20 @@
+# This cluster's BifrostBackend (the graph in rgd.yaml). apply.sh fills each
+# <...> value from the cluster and the sample's .env (common.sh render) and
+# applies the result. prefix and managedBy match bootstrap/'s scope (lib.sh).
+apiVersion: kro.run/v1alpha1
+kind: BifrostBackend
+metadata:
+  name: bifrost
+  namespace: bfx
+spec:
+  prefix: bfx
+  managedBy: bfx
+  clusterName: <CLUSTER_NAME>
+  accountID: "<ACCOUNT_ID>"
+  region: <AWS_REGION>
+  vpcID: <VPC_ID>
+  vpcCIDR: <VPC_CIDR>
+  subnetIDs: [<SUBNET_IDS>]
+  agentNamespace: <NAMESPACE>
+  modelID: <BEDROCK_MODEL_ID>
+  foundationModelID: <FOUNDATION_MODEL_ID>

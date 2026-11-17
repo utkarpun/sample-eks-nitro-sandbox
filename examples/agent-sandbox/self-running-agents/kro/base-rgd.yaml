@@ -1,0 +1,100 @@
+# SraBase: what must exist before the gateway graph can be applied. The
+# namespace the agent runs in (with the label setup.sh step 1 sets), the run
+# bucket (step 2) and the image repository (step 3). Applied first; the wrapper
+# then uploads the tool zip into the run bucket and pushes the agent image into
+# the repository, and only then applies the SraGateway instance (gateway-rgd.yaml),
+# because ACK's Function reads its code from S3 at create time.
+#
+# Cluster scoped: the instance has no namespace, since it is the thing that makes
+# the namespace. Every namespaced child names its namespace, and the ACK objects
+# reference the Namespace so kro deletes them before it.
+#
+# Never remove a field from spec.schema once this RGD is live: kro refuses the
+# instance CRD update and the instance stops reconciling, deletion included
+# (seen in a live test).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: sra-base
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: SraBase
+    scope: Cluster
+    spec:
+      prefix: string | default="sra"
+      # The Project tag value on every AWS resource that takes tags.
+      project: string | default="self-running-agents"
+      namespace: string | default="sra"
+      accountID: string | required=true
+      region: string | required=true
+    status:
+      namespace: ${ns.metadata.name}
+      bucketName: ${bucket.spec.name}
+      bucketARN: ${bucket.status.ackResourceMetadata.arn}
+      repositoryName: ${repository.spec.name}
+      repositoryARN: ${repository.status.ackResourceMetadata.arn}
+      repositoryURI: ${repository.status.repositoryURI}
+  resources:
+    # setup.sh step 1: the namespace, created with the sample's label in the same
+    # object so it never exists unlabelled.
+    - id: ns
+      template:
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${schema.spec.namespace}
+          labels:
+            app.kubernetes.io/managed-by: self-running-agents
+
+    # setup.sh step 2: the run bucket, tagged at create, public access blocked.
+    # SSE-S3 is the S3 default, as setup.sh relies on. The name is the default
+    # common.sh derives (<prefix>-runs-<account>-<Region>); gateway-rgd.yaml
+    # derives the same name. ACK does not empty a bucket before DeleteBucket
+    # (s3-controller pkg/resource/bucket/sdk.go:236-251@v1.16.0), so the destroy
+    # wrapper empties it before it deletes this instance.
+    - id: bucket
+      template:
+        apiVersion: s3.services.k8s.aws/v1alpha1
+        kind: Bucket
+        metadata:
+          name: ${schema.spec.prefix}-runs
+          namespace: ${ns.metadata.name}
+        spec:
+          name: ${schema.spec.prefix}-runs-${schema.spec.accountID}-${schema.spec.region}
+          createBucketConfiguration:
+            # us-east-1 takes no LocationConstraint (setup.sh:68-72).
+            locationConstraint: '${schema.spec.region == "us-east-1" ? omit() : schema.spec.region}'
+          publicAccessBlock:
+            blockPublicACLs: true
+            ignorePublicACLs: true
+            blockPublicPolicy: true
+            restrictPublicBuckets: true
+          tagging:
+            tagSet:
+              - key: Project
+                value: ${schema.spec.project}
+              - key: ManagedBy
+                value: ${schema.spec.prefix}
+
+    # setup.sh step 3: the image repository, scan on push. The annotation makes
+    # ACK delete it with its images, as cleanup.sh's delete-repository --force
+    # does (ecr-controller pkg/resource/repository/hook.go:21-23@v1.12.0).
+    - id: repository
+      template:
+        apiVersion: ecr.services.k8s.aws/v1alpha1
+        kind: Repository
+        metadata:
+          name: ${schema.spec.prefix}
+          namespace: ${ns.metadata.name}
+          annotations:
+            ecr.services.k8s.aws/force-delete: "true"
+        spec:
+          name: ${schema.spec.prefix}
+          imageScanningConfiguration:
+            scanOnPush: true
+          tags:
+            - key: Project
+              value: ${schema.spec.project}
+            - key: ManagedBy
+              value: ${schema.spec.prefix}

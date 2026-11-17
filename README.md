@@ -57,6 +57,7 @@ The same procurement analyst, with four choices for confining its tool processes
 - [IDE in the browser](examples/agent-sandbox/ide/README.md): code-server (VS Code in the browser) in a sandbox on a persistent EBS workspace, reached only by `kubectl port-forward`, with its password an argon2 hash from a Kubernetes Secret.
 - [Roll out a SandboxTemplate change with Argo Rollouts](examples/agent-sandbox/argo-rollouts/README.md): patching a `SandboxTemplate` leaves the warm pool serving pods built from the old one, so a claim can adopt a stale pod; an Argo Rollouts canary step plugin patches the template and then drains and re-warms the pool.
 - [Brain and hands](examples/agent-sandbox/brain-and-hands/README.md): an agent split in two, a brain that reasons with no tool that runs a command and hands that run every command in a sandbox pod claimed from a warm pool, reached through the agent-sandbox MCP server and sandboxd on two ports that admit only pods labelled `app=brain`.
+- [Self-running agents](examples/agent-sandbox/self-running-agents/README.md): one headless Claude Code run per Kubernetes Job in an isolated sandbox, whose only tools come through an Amazon Bedrock AgentCore Gateway under a Cedar policy and whose model calls go through Bifrost, an in-cluster model gateway.
 
 ## Storage
 

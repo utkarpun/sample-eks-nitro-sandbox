@@ -1,0 +1,5 @@
+# Only agent/ goes into the image. Everything else, including the gitignored
+# .env with your own cluster name, stays out of the build context.
+*
+!agent/
+!agent/**

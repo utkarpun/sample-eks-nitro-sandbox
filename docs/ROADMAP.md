@@ -44,7 +44,8 @@ examples/
 │   ├── warm-pool-autoscaling-keda/
 │   ├── ide/
 │   ├── argo-rollouts/
-│   └── brain-and-hands/
+│   ├── brain-and-hands/
+│   └── self-running-agents/
 ├── storage/
 │   ├── ebs/
 │   ├── efs/
@@ -156,6 +157,7 @@ The [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) resources,
 - [ide](../examples/agent-sandbox/ide/README.md) (available now): VS Code in the browser on a persistent EBS workspace. Spec: [#32](https://github.com/aws-samples/sample-eks-nitro-sandbox/issues/32).
 - [argo-rollouts](../examples/agent-sandbox/argo-rollouts/README.md) (available now): rolling a `SandboxTemplate` change through a warm pool with Argo Rollouts, replacing the warm sandboxes built from the old template. Spec: [#33](https://github.com/aws-samples/sample-eks-nitro-sandbox/issues/33).
 - [brain-and-hands](../examples/agent-sandbox/brain-and-hands/README.md) (available now): the agent (the brain) runs on an ordinary pod with model access and no local shell. Each command it runs goes to a warm sandbox (the hands) that it claims from a pool through the agent-sandbox MCP server and drives through sandboxd, with a template network policy that admits only pods labelled `app=brain` and allows no egress. Spec: [#38](https://github.com/aws-samples/sample-eks-nitro-sandbox/issues/38), updated in [#168](https://github.com/aws-samples/sample-eks-nitro-sandbox/issues/168).
+- [self-running-agents](../examples/agent-sandbox/self-running-agents/README.md) (available now): one headless agent run per Job.
 
 ### Storage (`storage`)
 
