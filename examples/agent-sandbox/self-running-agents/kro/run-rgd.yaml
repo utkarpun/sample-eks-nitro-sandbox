@@ -1,0 +1,124 @@
+# SraRun: one agent run. Its one child is the run's Job, the former
+# deploy/run-job.yaml with each placeholder taken from the instance's spec.
+# scripts/run.sh makes one instance per run (deploy/run.yaml) and ends the run
+# by deleting the instance, which deletes the Job.
+#
+# Two rules, because kro re-applies every child and restores one that was
+# deleted (kro docs, concepts/rgd/06-instances.md: "If a resource is manually
+# modified or deleted, kro detects the drift and automatically restores it"):
+#   - Never delete a run's Job alone: kro makes it again, which starts a second
+#     agent run. Delete the SraRun.
+#   - The Job has no ttlSecondsAfterFinished, for the same reason: a TTL delete
+#     is a Job delete.
+# Never edit an instance either: a Job's pod template is immutable, and kro
+# reports a changed immutable field as an error, not a recreate. One instance
+# per run.
+#
+# Namespaced: an instance lives in the sample's namespace (sra), with the
+# ServiceAccount agent, the ConfigMap agent-config and the Secret
+# bifrost-agent-key its Job uses, which the SraGateway instance and
+# bifrost/apply.sh make first. Applied by setup.sh with the other two graphs.
+#
+# Never remove a field from spec.schema once this RGD is live: kro refuses the
+# instance CRD update and the instance stops reconciling, deletion included
+# (seen in a live test of the other graphs).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: sra-run
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: SraRun
+    spec:
+      runID: string | required=true
+      # agent: headless Claude Code with the prompt; tools: list the gateway's
+      # tools and call each one probeCalls names (agent/run.sh).
+      mode: string | required=true
+      probeCalls: string | default=""
+      # The host agent/run.sh's egress gate waits to fail to reach.
+      egressCanary: string | default="example.com"
+      image: string | required=true
+      runBucket: string | required=true
+      region: string | required=true
+      # The namespace Bifrost runs in, and the model the agent's key may call.
+      bifrostNamespace: string | default="bfx"
+      modelID: string | required=true
+  resources:
+    - id: job
+      template:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+          labels:
+            app.kubernetes.io/name: agent
+            self-running-agents/run: ${schema.spec.runID}
+        spec:
+          # No retry, a 15-minute cap, and no ttlSecondsAfterFinished (see the top).
+          backoffLimit: 0
+          activeDeadlineSeconds: 900
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: agent
+                self-running-agents/run: ${schema.spec.runID}
+              annotations:
+                # A run has no retry (backoffLimit 0), so the node is pinned for its duration;
+                # EKS Auto Mode otherwise consolidates it mid-run (auto-cost-control.html).
+                karpenter.sh/do-not-disrupt: "true"
+            spec:
+              runtimeClassName: isolated-sandbox
+              serviceAccountName: agent
+              automountServiceAccountToken: false
+              enableServiceLinks: false
+              restartPolicy: Never
+              nodeSelector: { kubernetes.io/arch: amd64 }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                fsGroup: 1000
+                seccompProfile: { type: RuntimeDefault }
+              containers:
+                - name: agent
+                  image: ${schema.spec.image}
+                  env:
+                    - { name: RUN_ID, value: "${schema.spec.runID}" }
+                    - { name: RUN_MODE, value: "${schema.spec.mode}" }
+                    - { name: PROBE_CALLS, value: "${schema.spec.probeCalls}" }
+                    - { name: EGRESS_CANARY, value: "${schema.spec.egressCanary}" }
+                    - { name: RUN_BUCKET, value: "${schema.spec.runBucket}" }
+                    - { name: AWS_REGION, value: "${schema.spec.region}" }
+                    - { name: AWS_S3_US_EAST_1_REGIONAL_ENDPOINT, value: "regional" }
+                    # The model calls go to Bifrost (bifrost/), which calls Bedrock with its own
+                    # role; the agent's role has no Bedrock permission. The key is read by
+                    # agent/settings.json's apiKeyHelper from the vk volume.
+                    - { name: ANTHROPIC_BASE_URL, value: "http://bifrost.${schema.spec.bifrostNamespace}.svc.cluster.local:8080/anthropic" }
+                    - { name: ANTHROPIC_MODEL, value: "bedrock/${schema.spec.modelID}" }
+                    # Claude Code's background model uses the same model, the only one the
+                    # agent's key may call.
+                    - { name: ANTHROPIC_DEFAULT_HAIKU_MODEL, value: "bedrock/${schema.spec.modelID}" }
+                    - { name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, value: "1" }
+                    - { name: DISABLE_TELEMETRY, value: "1" }
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities: { drop: [ALL] }
+                  resources:
+                    requests: { cpu: "1", memory: 2Gi }
+                    limits: { cpu: "1", memory: 2Gi }
+                  volumeMounts:
+                    - { name: cfg, mountPath: /cfg, readOnly: true }
+                    - { name: home, mountPath: /home/node }
+                    - { name: work, mountPath: /work }
+                    - { name: tmp, mountPath: /tmp }
+                    - { name: vk, mountPath: /vk, readOnly: true }
+              volumes:
+                - { name: cfg, configMap: { name: agent-config } }
+                - { name: home, emptyDir: {} }
+                - { name: work, emptyDir: {} }
+                - { name: tmp, emptyDir: {} }
+                # The agent's Bifrost key, which bifrost/apply.sh copies into this namespace.
+                - { name: vk, secret: { secretName: bifrost-agent-key, defaultMode: 0440 } }
