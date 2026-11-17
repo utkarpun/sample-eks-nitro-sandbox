@@ -50,7 +50,8 @@ the agent's tool list holds `clock___get_time` alone.
 A denied call is a JSON-RPC error, not a tool result:
 `Tool Execution Denied: ... [No policy applies to the request (denied by default).]`. The
 bridge offers only the tools the gateway listed, so to see the gateway refuse a tool, call
-it directly, as `agent/mcp_call.py` does (`test.sh` checks T2 and NC2).
+it directly, as `agent/mcp_call.py` does (`test.sh` calls both tools this way and checks
+that only `get_time` is answered).
 
 ## The agent's side
 
@@ -68,8 +69,8 @@ it directly, as `agent/mcp_call.py` does (`test.sh` checks T2 and NC2).
   the engine, so that permission is what to guard.
 - **The gateway role is scoped by name, not exact ARN.** The role is made before the
   gateway, and kro cannot make the role and the gateway depend on each other. Making it
-  first also avoids an IAM propagation failure that ACK would not retry. Its trust lets any
-  AgentCore gateway in this account and Region assume it (`gateway/*`).
+  first also makes an IAM propagation failure, which ACK would not retry, less likely; it is
+  a timing fix, not a guarantee. Its trust lets any AgentCore gateway in this account and Region assume it (`gateway/*`).
 - **Where a refusal is recorded.** The gateway's own logs do not carry policy decisions. The
   `DenyDecisions` metric in `AWS/Bedrock-AgentCore` does, by default:
   `aws cloudwatch get-metric-statistics --namespace AWS/Bedrock-AgentCore --metric-name DenyDecisions ...`.

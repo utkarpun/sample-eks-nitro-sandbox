@@ -28,5 +28,5 @@ kubectl -n sra delete pod -l self-running-agents/run=<its runID>
 
 Every field is required except `probeCalls`; the graph sets no defaults.
 
-A run with no verdict 60 s after its logs end, or whose pod does not start within 10
-minutes, leaves its `SraRun` in place for `cleanup.sh`.
+An interrupted `run.sh`, a run with no verdict 60 s after its logs end, or one whose pod
+does not start within 10 minutes leaves its `SraRun` in place for `cleanup.sh`.

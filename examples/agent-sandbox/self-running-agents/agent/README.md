@@ -26,8 +26,9 @@ gateway's address is not baked in: it comes from the ConfigMap `agent-config`, w
 - **`tools`**: list the gateway's tools and call each name in `PROBE_CALLS`, with no model,
   so a refusal is the gateway's and not the model's choice. `test.sh` uses this.
 
-The output goes to standard output, which `scripts/run.sh` streams as it happens, and to
-`s3://<run bucket>/runs/<run id>/` before the pod exits. Nothing is kept in the pod. The
+The output goes to standard output, which `scripts/run.sh` streams as it happens, and, on a
+normal exit, to `s3://<run bucket>/runs/<run id>/`. A run stopped at its 15-minute deadline
+stores nothing; the streamed log is its only record. Nothing is kept in the pod. The
 root filesystem is read-only, so the home directory is an `emptyDir`.
 
 ## The egress gate

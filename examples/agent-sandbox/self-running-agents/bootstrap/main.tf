@@ -66,7 +66,7 @@ resource "aws_iam_role_policy" "ack" {
       },
       { Sid = "Buckets", Effect = "Allow", Action = ["s3:*"], Resource = ["arn:aws:s3:::${local.w}", "arn:aws:s3:::${local.w}/*"] },
       { Sid = "ListBucketsIsStarOnly", Effect = "Allow", Action = ["s3:ListAllMyBuckets"], Resource = "*" },
-      # kro/base-rgd.yaml names the repository plain ${var.prefix}, which sra-* does not match.
+      # kro/base-rgd.yaml names the repository plain ${var.prefix}.
       { Sid = "Repositories", Effect = "Allow", Action = ["ecr:*"], Resource = ["arn:aws:ecr:${var.region}:${local.account}:repository/${var.prefix}"] },
       # RDS for the Bifrost unit: instances and subnet groups by name; creating
       # an instance also names the default option and parameter groups.

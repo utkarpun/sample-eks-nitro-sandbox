@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # One stateless agent run, inside the sandbox. The Job that runs this is created
 # for one run and gone after it: everything the run produces is printed to
-# standard output, which scripts/run.sh streams out as it happens, and copied to
-# the run bucket before the pod exits. Nothing is kept in the pod.
+# standard output, which scripts/run.sh streams out as it happens, and, on a
+# normal exit, copied to the run bucket. A run stopped at its deadline stores
+# nothing. Nothing is kept in the pod.
 #
 # RUN_MODE picks what the pod does:
 #   agent     headless Claude Code with the prompt in /cfg/prompt.txt

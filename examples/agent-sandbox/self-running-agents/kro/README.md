@@ -34,9 +34,9 @@ run. Bifrost has a fourth graph of its own, in [`bifrost/rgd.yaml`](../bifrost/R
 Each AWS resource that takes tags is tagged `Project=<PROJECT_TAG>` (`PROJECT_TAG` in
 `.env`, default `self-running-agents`) and `ManagedBy=sra`; the target and the Cedar policy
 take none. The names are fixed in `base.yaml` and `gateway.yaml` and match `bootstrap/`'s
-`prefix`, which scopes most of the ACK role to them. ACK makes each resource by its name and fails
-on a name that is taken (the graphs configure no adoption), so it never takes over another
-demo's role.
+`prefix`, which scopes the ACK role's IAM role, Lambda, log group, S3 and ECR rights to
+them. ACK makes each resource by its name and fails on a name that is taken (the graphs
+configure no adoption), so it never takes over another demo's role.
 
 ## The agent's boundaries
 

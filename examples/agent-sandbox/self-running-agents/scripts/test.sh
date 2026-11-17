@@ -75,7 +75,7 @@ print(f"T2 {int(not t2)} listed={doc.get('listed', [])} get_time={t.get('text','
 print(f"NC2 {int(not nc2)} get_host_info isError={d.get('isError')} text={d.get('text','')[:200]}")
 PY
 while read -r name code rest; do verdict "$name" "$code" "$rest"; done < <(grep -E '^(T2|NC2) ' "$LOG_DIR/tools.check")
-grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run's output: $(tail -3 "$LOG_DIR/tools.log" | tr '\n' ' ')"
+grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run's output: $(tail -3 "$LOG_DIR/tools.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/g; s|(assumed-role/[^/]+/)[^ ]*|\1<session>|g; s|[a-z0-9-]+\.gateway\.bedrock-agentcore\.|<id>.gateway.bedrock-agentcore.|g' | tr '\n' ' ')"
 
 # NC1: a host the egress rule does not name, read from the T run's egress gate line.
 line="$(grep -E "^sra: egress gate: ${EGRESS_CANARY:-example.com}:443 failed to connect 3 times" "$LOG_DIR/T.log")"
@@ -91,8 +91,8 @@ verdict NC4 $? "${line:-no gate line} run rc=$nrc"
 # NC-B1: the agent cannot reach Bedrock without Bifrost, at two layers. IAM, which holds on any node: the
 # agent role may not invoke the model's inference profile, and Bifrost's role may (the control). Network:
 # a run whose canary is bedrock-runtime goes on, since the egress rule no longer names it; NC4 is its
-# control. On EKS Auto Mode an allow learned for one pod is shared with every pod on its node, so on a node
-# that also runs Bifrost the network leg can read FAIL while the IAM leg still holds.
+# control. On the cluster this sample was written on, an allow learned for one pod was shared with every
+# pod on its node, so on a node that also runs Bifrost the network leg can read FAIL while the IAM leg still holds.
 resolve_account
 BIFROST_ROLE=bfx-bifrost   # bifrost/rgd.yaml names it ${prefix}-bifrost, prefix bfx (bifrost/lib.sh)
 sim() {

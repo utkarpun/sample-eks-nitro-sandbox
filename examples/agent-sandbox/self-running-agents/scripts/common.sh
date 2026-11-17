@@ -11,7 +11,8 @@ set -euo pipefail
 SAMPLE=self-running-agents
 TARGET=clock                # the gateway target; its tools are clock___<tool>
 # The names kro/base.yaml and kro/gateway.yaml set (prefix, namespace and the
-# instance name), and bootstrap's var.prefix, which scopes the ACK role to them.
+# instance name), and bootstrap's var.prefix, which scopes the ACK role's IAM role,
+# Lambda, log group, S3 and ECR rights to them.
 PREFIX=sra
 NAMESPACE=sra
 INSTANCE=sra

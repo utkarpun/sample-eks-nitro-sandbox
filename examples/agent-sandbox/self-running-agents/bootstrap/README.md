@@ -40,9 +40,8 @@ admins.
 | `rds_prefix` | `bfx` | For Bifrost; creates nothing on its own |
 | `secret_namespaces` | `["sra", "bfx"]` | |
 
-Its providers' pinned versions are in the sample's [Versions](../README.md#versions) table;
-it needs Terraform 1.5 or later, the AWS provider 6.73.0 or later and the Kubernetes
-provider 2.30 or later. It reads the cluster when it plans, so the cluster must exist first.
+Versions: [Prerequisites](../README.md#prerequisites) and [Versions](../README.md#versions).
+It reads the cluster when it plans, so the cluster must exist first.
 
 ## Apply it
 

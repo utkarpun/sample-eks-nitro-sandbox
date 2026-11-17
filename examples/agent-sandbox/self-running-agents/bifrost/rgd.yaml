@@ -30,7 +30,8 @@ spec:
       # secret_namespaces, so the ACK rds controller may read the password there.
       namespace: string | default="bfx"
       # Names every AWS resource: <prefix>-bifrost. The default is inside
-      # bootstrap/'s rds_prefix, which scopes the ACK role to these names.
+      # bootstrap/'s rds_prefix, which scopes the ACK role's IAM role and RDS
+      # rights to these names.
       prefix: string | default="bfx"
       # The ManagedBy tag on every AWS resource made here, so a clean up can
       # tell this sample's resources from anyone else's; one bootstrap/ allows.
@@ -284,7 +285,9 @@ spec:
     # (kro/run-rgd.yaml mounts it). kro reads a Secret's data as bytes and does not
     # put bytes in a template, so the copy encodes them back to base64, as kro's
     # error asks (pkg/cel/conversion/conversions.go:105 at v0.10.0: "encode it
-    # explicitly, e.g. base64.encode(...)").
+    # explicitly, e.g. base64.encode(...)"). The EKS kro capability's version is not in
+    # AWS's docs (aws eks describe-capability reads it), so whether it accepts this
+    # form is first shown when the graph goes ACTIVE.
     - id: agentKeyCopy
       template:
         apiVersion: v1

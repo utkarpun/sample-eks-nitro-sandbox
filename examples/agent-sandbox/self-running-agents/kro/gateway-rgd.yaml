@@ -1,4 +1,4 @@
-# SraGateway: everything setup.sh makes after the bucket and the image, as one
+# SraGateway: everything the agent needs after the bucket and the image, as one
 # kro graph of ACK and Kubernetes objects. Applied after the SraBase instance is
 # ACTIVE, the tool zip is in the run bucket and the agent image is pushed.
 # Starts from a graph proven in a live test of the same gateway path.
@@ -60,7 +60,7 @@ spec:
       agentRoleARN: ${agentRole.status.ackResourceMetadata.arn}
       podIdentityAssociationID: ${pia.status.associationID}
   resources:
-    # ---- setup.sh step 1 (admission) -------------------------------------------
+    # ---- admission -------------------------------------------------------------
     # Replaces the former deploy/admission.yaml at 3c347b1, the namespace filled in.
     - id: admission
       template:
@@ -97,7 +97,7 @@ spec:
             namespaceSelector:
               matchLabels: { kubernetes.io/metadata.name: "${schema.spec.namespace}" }
 
-    # ---- setup.sh step 4: the tool function, its log group and role -------------
+    # ---- the tool function, its log group and role -------------------------------
     - id: toolRole
       template:
         apiVersion: iam.services.k8s.aws/v1alpha1
@@ -163,8 +163,8 @@ spec:
             Project: ${schema.spec.project}
             ManagedBy: ${schema.spec.prefix}
 
-    # ---- setup.sh step 5: the policy engine ----------------------------------------
-    # Policy engine and policy names allow no dashes (common.sh:77).
+    # ---- the policy engine -------------------------------------------------------
+    # Policy engine and policy names allow no dashes.
     - id: engine
       readyWhen:
         - ${engine.status.status == "ACTIVE"}
@@ -181,13 +181,13 @@ spec:
             Project: ${schema.spec.project}
             ManagedBy: ${schema.spec.prefix}
 
-    # ---- setup.sh step 6: the gateway role and the gateway --------------------------
+    # ---- the gateway role and the gateway ------------------------------------------
     # The role names the function, the policy engine and the gateway by name
     # pattern, not by their status, so it depends on nothing and is made at the
     # start of the graph: a role made seconds before CreateGateway fails IAM
     # propagation, ACK marks that ACK.Terminal and does not retry (seen in a live test).
-    # kro cannot make Role and Gateway depend on each other, so this is setup.sh's
-    # first pass (:149-151), not its second with the exact gateway ARN (:172-174).
+    # kro cannot make Role and Gateway depend on each other, so the role names the
+    # gateway by pattern, not by its exact ARN.
     - id: gwRole
       template:
         apiVersion: iam.services.k8s.aws/v1alpha1
@@ -229,8 +229,8 @@ spec:
             Project: ${schema.spec.project}
             ManagedBy: ${schema.spec.prefix}
 
-    # ---- setup.sh step 7: the target and the Cedar policy ---------------------------
-    # Tool schemas as setup.sh:180-185; inputSchema is a JSON string in the CRD.
+    # ---- the target and the Cedar policy -------------------------------------------
+    # inputSchema is a JSON string in the CRD.
     # GatewayTarget takes no tags.
     - id: target
       readyWhen:
@@ -261,7 +261,7 @@ spec:
 
     # Replaces the former policy/allow-get-time.cedar at 3c347b1: the agent role may call clock___get_time on
     # this gateway and nothing else. It references the target so it is made
-    # after the target is READY, as setup.sh orders it (:192-201). Policy takes
+    # after the target is READY. Policy takes
     # no tags.
     - id: policy
       readyWhen:
@@ -286,7 +286,7 @@ spec:
                   resource == AgentCore::Gateway::"${gateway.status.ackResourceMetadata.arn}"
                 );
 
-    # ---- setup.sh step 8: the agent role and its Pod Identity association -----------
+    # ---- the agent role and its Pod Identity association ---------------------------
     # Replaces the former iam/agent-trust.json and iam/agent-policy.json at 3c347b1, values filled in.
     - id: agentRole
       template:
@@ -313,7 +313,7 @@ spec:
             - key: ManagedBy
               value: ${schema.spec.prefix}
 
-    # Replaces the former deploy/serviceaccount.yaml at 3c347b1 (setup.sh step 9, made here so the association
+    # Replaces the former deploy/serviceaccount.yaml at 3c347b1 (made here so the association
     # can name it).
     - id: agentSA
       template:
@@ -340,7 +340,7 @@ spec:
             Project: ${schema.spec.project}
             ManagedBy: ${schema.spec.prefix}
 
-    # ---- setup.sh step 9: the egress rule and the agent's configuration -------------
+    # ---- the egress rule and the agent's configuration -----------------------------
     # Replaces the former deploy/egress.yaml at 3c347b1, the gateway host read from the gateway's URL.
     - id: egress
       template:

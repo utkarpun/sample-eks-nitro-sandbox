@@ -13,7 +13,7 @@ for crd in resourcegraphdefinitions.kro.run securitygroups.ec2.services.k8s.aws 
            roles.iam.services.k8s.aws podidentityassociations.eks.services.k8s.aws; do
   rc=0; resource_exists kc_cluster crd "$crd" || rc=$?
   case $rc in
-    1) die "CRD $crd is not on this cluster. Turn on the sample's kro and ACK capabilities first (README, Before you start):
+    1) die "CRD $crd is not on this cluster. Turn on the sample's kro and ACK capabilities first (bifrost/README.md, Before you start):
   terraform -chdir=bootstrap init && terraform -chdir=bootstrap apply -var cluster_name=$CLUSTER_NAME -var region=$AWS_REGION" ;;
     2) die "could not read the cluster's CRDs; stopping rather than guess" ;;
   esac

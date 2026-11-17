@@ -14,7 +14,7 @@ source "$BF_DIR/../scripts/common.sh"
 # security group's ManagedBy "bfx". The namespace is common.sh's BIFROST_NAMESPACE,
 # which instance.yaml gets as a placeholder; instance.yaml's prefix and managedBy
 # and scripts/test.sh's BIFROST_ROLE carry the other two. Change them all together
-# with those variables (bifrost/README.md lists every site).
+# with those variables (`git grep -n bfx` finds every site).
 BF_PREFIX=bfx
 BF_MANAGED_BY=bfx
 # The agent pods' namespace is the sample's own (common.sh NAMESPACE, made by kro/base.yaml).

@@ -1,6 +1,6 @@
 # SraBase: what must exist before the gateway graph can be applied. The
-# namespace the agent runs in (with the label setup.sh step 1 sets), the run
-# bucket (step 2) and the image repository (step 3). Applied first; the wrapper
+# namespace the agent runs in (with the sample's label), the run bucket and the
+# image repository. Applied first; the wrapper
 # then uploads the tool zip into the run bucket and pushes the agent image into
 # the repository, and only then applies the SraGateway instance (gateway-rgd.yaml),
 # because ACK's Function reads its code from S3 at create time.
@@ -34,7 +34,7 @@ spec:
       repositoryARN: ${repository.status.ackResourceMetadata.arn}
       repositoryURI: ${repository.status.repositoryURI}
   resources:
-    # setup.sh step 1: the namespace, created with the sample's label in the same
+    # The namespace, created with the sample's label in the same
     # object so it never exists unlabelled.
     - id: ns
       template:
@@ -45,8 +45,8 @@ spec:
           labels:
             app.kubernetes.io/managed-by: self-running-agents
 
-    # setup.sh step 2: the run bucket, tagged at create, public access blocked.
-    # SSE-S3 is the S3 default, as setup.sh relies on. The name is the default
+    # The run bucket, tagged at create, public access blocked.
+    # SSE-S3 is the S3 default. The name is the default
     # common.sh derives (<prefix>-runs-<account>-<Region>); gateway-rgd.yaml
     # derives the same name. ACK does not empty a bucket before DeleteBucket
     # (s3-controller pkg/resource/bucket/sdk.go:236-251@v1.16.0), so the destroy
@@ -61,7 +61,7 @@ spec:
         spec:
           name: ${schema.spec.prefix}-runs-${schema.spec.accountID}-${schema.spec.region}
           createBucketConfiguration:
-            # us-east-1 takes no LocationConstraint (setup.sh:68-72).
+            # us-east-1 takes no LocationConstraint.
             locationConstraint: '${schema.spec.region == "us-east-1" ? omit() : schema.spec.region}'
           publicAccessBlock:
             blockPublicACLs: true
@@ -75,7 +75,7 @@ spec:
               - key: ManagedBy
                 value: ${schema.spec.prefix}
 
-    # setup.sh step 3: the image repository, scan on push. The annotation makes
+    # The image repository, scan on push. The annotation makes
     # ACK delete it with its images, as cleanup.sh's delete-repository --force
     # does (ecr-controller pkg/resource/repository/hook.go:21-23@v1.12.0).
     - id: repository
