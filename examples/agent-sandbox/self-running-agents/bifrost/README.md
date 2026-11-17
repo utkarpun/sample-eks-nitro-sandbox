@@ -15,10 +15,16 @@ What is code and what is not:
   Bifrost's IAM role and its EKS Pod Identity association, the ServiceAccount, a fixed name
   for the database (`Service bifrost-db`), the pricing ConfigMap (from `pricing/`),
   Bifrost's network policy and the agent's copy of its key in `sra`. The instance is cluster scoped, because it makes the namespace,
-  and deleting it deletes the namespace last.
+  and deleting it deletes the namespace last. The key copy is written with
+  `base64.encode`, the form kro's [CEL libraries page](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md) gives for a Secret. The EKS
+  kro capability's version is not published (`aws eks describe-capability` shows it), so
+  whether the capability accepts that form is first shown when the graph goes ACTIVE in
+  the sample's first fresh run.
 - **The four Secrets** (the database password, the encryption key, the admin login and the
   agent's key) are made by `apply.sh` from random bytes, once the graph has made the
-  namespace: their values must be secret, and a kro graph cannot make a secret value.
+  namespace: their values must be secret, and kro's only generator, `random.seededString`,
+  is deterministic from a seed anyone who can read the instance can read, so a graph cannot
+  make a secret value ([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
 - kro and ACK are the sample's own EKS managed capabilities, from `bootstrap/`.
 - `apply.sh`, `test.sh` and `destroy.sh` wrap them: check the prerequisites, read the
   cluster's VPC, make the Secrets, apply, wait and read back.
@@ -81,14 +87,17 @@ The RDS instance bills from `apply.sh` until `destroy.sh` ends with `clean up co
    [Self-running agents](../README.md)). `apply.sh` checks for their CRDs and stops with
    the `terraform` command if one is missing.
 2. The sample's `./scripts/setup.sh`, which makes the namespace `sra` the callers run in.
-   `apply.sh` copies the agent's key there.
+   The Bifrost graph (bifrost/rgd.yaml, agentKeyCopy) copies the agent's key there.
 3. `aws`, `kubectl`, `helm` 3, `python3` and `openssl` on your machine.
 
 The names are fixed to fit `bootstrap/`'s scope (`bootstrap/variables.tf`): the namespace
 `bfx` is in its `secret_namespaces` (ACK reads the database password there), and the AWS
 names `bfx-bifrost` and `bfx-bifrost-db` and the tag `ManagedBy=bfx` match its
-`rds_prefix`. To change them, change `rds_prefix` and `secret_namespaces`, `lib.sh` and
-`instance.yaml` together.
+`rds_prefix`. To change them, change every site together: `rds_prefix` and
+`secret_namespaces` in `bootstrap/variables.tf`, `BIFROST_NAMESPACE` in
+`scripts/common.sh` (which `lib.sh` and `run.sh` read), `BF_PREFIX` and `BF_MANAGED_BY` in
+`lib.sh`, `prefix` and `managedBy` in `instance.yaml`, and `BIFROST_ROLE` in
+`scripts/test.sh`.
 
 The cluster, Region, kube context and model come from the sample's `.env`, as for the agent
 (`CLUSTER_NAME`, `AWS_REGION`, `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`). The commands on this page use
@@ -119,6 +128,16 @@ TODO: output from the fresh run
 ```
 
 `apply.sh` makes the four Secrets once and never prints them; a re-run keeps them.
+
+**On a cluster that ran the earlier, namespaced Bifrost graph**, `apply.sh` fails at the
+graph: kro cannot change a graph's `scope` once it is applied. Delete the old instance,
+graph and instance kind first, in this order, then run `apply.sh`:
+
+```bash
+kubectl --context <KUBE_CONTEXT> -n bfx delete bifrostbackend bifrost --wait --timeout=1500s
+kubectl --context <KUBE_CONTEXT> delete rgd bifrost-backend
+kubectl --context <KUBE_CONTEXT> delete crd bifrostbackends.kro.run
+```
 
 ## Prove it
 
@@ -180,4 +199,6 @@ billing: check it with `kubectl --context <KUBE_CONTEXT> get bifrostbackend bifr
 `aws rds describe-db-instances --region <AWS_REGION> --db-instance-identifier bfx-bifrost`, then run
 `./bifrost/destroy.sh` again.
 
-It leaves kro and ACK, which come from `bootstrap/`.
+It leaves kro and ACK, which come from `bootstrap/`, so run it before you remove them;
+if one is already gone, see *If kro or ACK is already gone* on the
+[sample's page](../README.md).

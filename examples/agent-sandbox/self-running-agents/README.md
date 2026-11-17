@@ -30,7 +30,7 @@ for Bifrost's PostgreSQL database on Amazon RDS, which bills until `bifrost/dest
 with `clean up complete` ([what it costs](bifrost/README.md#what-it-costs)).
 
 ```bash
-git clone -b self-running-agents-sync-20261117 https://github.com/utkarpun/sample-eks-nitro-sandbox.git
+git clone -b self-running-agents-kro https://github.com/utkarpun/sample-eks-nitro-sandbox.git
 cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 ```
 
@@ -91,7 +91,7 @@ TODO: output from the fresh run
 | The tool | A Lambda function with two read-only tools, `get_time` and `get_host_info` | AWS Lambda |
 | The model gateway | Bifrost, which calls Bedrock with its own role for requests that carry the agent's key | A Deployment in the namespace `bfx` ([bifrost/](bifrost/README.md)) |
 | The run's state | `runs/<run id>/` in a run bucket | Amazon S3 |
-| The infrastructure | Three kro graphs, `SraBase` and `SraGateway` over ACK, and `SraRun`, one instance per run | The EKS managed kro and ACK capabilities |
+| The infrastructure | Four kro graphs: `SraBase`, `SraGateway` and `BifrostBackend` over ACK, and `SraRun`, one instance per run | The EKS managed kro and ACK capabilities |
 
 A run goes like this:
 
@@ -103,11 +103,12 @@ A run goes like this:
    The gateway lists only the tools the Cedar policy permits that role: `clock___get_time`.
 4. The model calls `clock___get_time`. The gateway asks the policy engine, the policy
    permits it, and the gateway invokes the Lambda function.
-5. The pod copies the run's stream to the run bucket, exits, and `run.sh` deletes the
-   `SraRun` instance, which deletes the Job, then the pod, which kro leaves (kro#1330).
+5. The pod copies the run's stream to the run bucket and exits. `run.sh` deletes the
+   SraRun, which deletes the Job; kro leaves the Job's pod ([kro#1330](https://github.com/kubernetes-sigs/kro/issues/1330)), so `run.sh`
+   then deletes the pod.
 
-Never delete a run's Job by hand, only its `SraRun`: kro makes a deleted Job again, which
-starts a second run.
+Never delete a run's Job by hand: delete its `SraRun`, then its pod. kro makes a deleted
+Job again, which starts a second run.
 
 ### Design
 
@@ -265,6 +266,9 @@ ServiceAccount, so a pod created in the namespace without the label but with
 `serviceAccountName: agent` gets the agent's AWS credentials and the cluster's default
 egress (`DefaultAllow` here). Keep `create pods` in the namespace to yourself.
 Creating a `SraRun` gives the same: kro makes its Job, and any `image` runs as `agent` with its Pod Identity role and the Bifrost key. Keep `create` on `sraruns` to yourself too.
+Keep `create` on `bifrostbackends` to cluster admins: an instance can make, label and later
+delete the namespace it names and write the agent's key into the namespace `agentNamespace`
+names.
 
 **Whoever can create ACK objects holds the ACK role.** The ACK capability acts with one
 role for every namespace, and that role may manage any IAM role named `sra-*` and pass it
@@ -328,9 +332,11 @@ sample's resources. The account id is replaced with `<ACCOUNT_ID>`, the cluster 
 with `<CLUSTER_NAME>`, and the generated ids of the gateway, the policy engine and the Pod
 Identity association with `<id>`; long blocks are abridged where marked. The `sra:` prefix
 on the pod's own lines is fixed in `agent/run.sh`.
+The kro form of the run (SraRun) and of Bifrost's graph has not yet run on a cluster; the
+TODO blocks fill from its first fresh run.
 
-**Step 0: turn on kro and ACK.** Once per cluster, and again (`terraform apply` in
-`bootstrap/`) after you pull a change to it, such as the run's Job rule. The stack makes one IAM role for both
+**Step 0: turn on kro and ACK.** Once per cluster. After a pull, run Step 0 and then
+Step 2 again. The stack makes one IAM role for both
 capabilities, the ACK and kro capabilities, a Secret reader access policy in the namespaces
 `secret_namespaces` names, and a ClusterRole that lets kro manage the ACK kinds and the
 Kubernetes objects the graphs use, the run's Job (`batch` `jobs`) included. Its `rds_prefix` and RDS statements are for
@@ -386,7 +392,9 @@ TODO: output from the fresh run
 **Step 2b: set up Bifrost.** Follow [Bifrost's README](bifrost/README.md). `bifrost/apply.sh`
 needs the namespace `sra` that `setup.sh` made, and its graph copies the agent's key into it;
 `run.sh` and `test.sh` stop until that key is there. Bifrost's four Secrets are made by
-`apply.sh`, not its graph: a kro graph cannot make a secret value.
+`apply.sh`, not its graph: kro's only generator, `random.seededString`, is deterministic
+from a seed anyone who can read the instance can read, so a graph cannot make a secret value
+([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
 
 ```bash
 ./bifrost/apply.sh
@@ -450,7 +458,7 @@ example.com, a pod without the agent label, a pod without
 
 <a id="step-5"></a>
 **Step 5: the window the egress gate is for.** This block is from a separate, earlier run
-of the same Job (the pod is unchanged) with the gate replaced by a loop that requests
+made before the SraRun graph, of the same pod spec (then a bare Job), with the gate replaced by a loop that requests
 `example.com` every few seconds from the moment the pod starts:
 
 ```text
@@ -473,20 +481,21 @@ of the same Job (the pod is unchanged) with the gate replaced by a loop that req
   gateway made a moment after its role can fail IAM propagation, and ACK does not retry an
   `ACK.Terminal` error; the graph makes the gateway role first to avoid it, which is a
   timing fix, not a guarantee. Run `cleanup.sh`, then `setup.sh` again.
-- **Changing a graph.** Never remove a field from a graph's `spec.schema` while its
-  instance exists: kro refuses the change and the instance stops reconciling, deletion
-  included. Run `cleanup.sh` first.
+- **Changing a graph.** Never make a breaking schema change (remove a field, add a required
+  field without a default, change a type) while its instance exists: kro refuses the change
+  and the instance stops reconciling, deletion included. Run `cleanup.sh` first.
 - **Changing the tool.** Edit `tool/handler.py` and run `setup.sh`: a new zip has a new key
   and hash, and ACK updates the function's code.
 - **The run's logs.** Read a past run from the bucket:
   `aws s3 cp s3://<run bucket>/runs/<run id>/stream.jsonl -`.
-- **Limits.** A run is stopped at 15 minutes (`activeDeadlineSeconds`), is not retried, and
+- **Limits.** A run is stopped at 15 minutes while its Job exists (`activeDeadlineSeconds`), is not retried, and
   the model gets at most 8 turns; change them in `kro/run-rgd.yaml` and `agent/run.sh`.
 - **A failed run.** `run.sh` prints the Job's verdict and deletes the run's `SraRun`, so read the
   streamed output or, if the pod got past the egress gate, `runs/<run id>/` in the bucket; a pod exit of 3 means the egress gate
   failed and stored nothing. A run with no verdict 60 s after its logs end, or whose pod does not start within
   10 minutes, leaves its `SraRun` for `cleanup.sh`. To remove one run alone:
-  `kubectl -n sra delete srarun <name>`, then the pod it leaves; never the Job.
+  `kubectl -n sra delete srarun <name>`, then `kubectl -n sra delete pod -l self-running-agents/run=<its runID>`:
+  once its Job is gone the pod has no 15-minute deadline and holds its node. Never the Job.
 - **Where a refusal is recorded.** The gateway's own logs do not carry policy decisions; the
   `DenyDecisions` metric in `AWS/Bedrock-AgentCore` does, by default:
   `aws cloudwatch get-metric-statistics --namespace AWS/Bedrock-AgentCore --metric-name DenyDecisions ...`.
@@ -536,7 +545,8 @@ kro deletes the agent's copy of the key in `sra`, and the namespace `bfx` last, 
 Secrets in it. `cleanup.sh` then deletes the runs' `SraRun` instances
 and their pods, and the `SraGateway` instance, empties the run bucket,
 deletes the `SraBase` instance (the bucket, the image repository and the namespace `sra`)
-and the three graphs. Each script is done when its last line is `clean up complete`. If one ends
+and the three graphs `SraRun`, `SraGateway` and `SraBase`; `bifrost/destroy.sh` removes the
+fourth, `BifrostBackend`. Each script is done when its last line is `clean up complete`. If one ends
 `clean up incomplete` (Bifrost) or `clean up INCOMPLETE: <n> item(s) above` (the sample), the
 lines above it name what is left: run that script again before you go on. A database left
 behind keeps billing, and its security group blocks the VPC delete in step 4.
@@ -549,6 +559,18 @@ TODO: output from the fresh run
 (another sample's graphs). They are made with `delete_propagation_policy = "RETAIN"`
 (`bootstrap/main.tf`), so deleting them does not delete what the graphs made: both scripts
 in step 2 must have ended `clean up complete` first.
+
+**If kro or ACK is already gone.** kro puts the finalizer `kro.run/finalizer` on every
+instance, and ACK puts `finalizers.<service>.services.k8s.aws/<Kind>` on each object it
+manages. With the controller gone nothing removes them, so `cleanup.sh` and
+`bifrost/destroy.sh` time out and end incomplete. To see it, an object stays with a
+`deletionTimestamp` and its finalizer:
+`kubectl get <kind> -A -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers`.
+To recover, first delete in AWS, by name, each object the scripts' `read back` lines name
+as present, then remove the finalizer from each stuck object:
+`kubectl -n <namespace> patch <kind> <name> --type=merge -p '{"metadata":{"finalizers":null}}'`
+(no `-n` for the cluster-scoped `SraBase`, `SraGateway` and `BifrostBackend`). Removing an ACK finalizer
+before the AWS delete leaves that AWS object with nothing to remove it.
 
 ```bash
 cd bootstrap
@@ -628,4 +650,4 @@ cluster, the runtime classes and network policy enforcement stay, which this sam
 reads, and the capabilities stay if you skipped step 3. On your machine: the agent image in
 Docker's local store (`docker image rm <image>`), Terraform's state in `bootstrap/` (and
 `cluster/`), and `tmp/self-running-agents/` at the clone's root with test.sh's logs (or
-`LOG_DIR`). Auto Mode removes the run's node on its own.
+`LOG_DIR`). Auto Mode removes the run's node on its own, once no run's pod is left.

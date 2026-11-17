@@ -1,7 +1,8 @@
 # SraRun: one agent run. Its one child is the run's Job, each placeholder of the
 # old per-run Job manifest taken from the instance's spec.
 # scripts/run.sh makes one instance per run (deploy/run.yaml) and ends the run
-# by deleting the instance, which deletes the Job.
+# by deleting the instance, which deletes the Job but not its pod
+# (https://github.com/kubernetes-sigs/kro/issues/1330), so run.sh then deletes the pod.
 #
 # Two rules, because kro re-applies every child and restores one that was
 # deleted (kro docs, concepts/rgd/06-instances.md: "If a resource is manually
@@ -19,9 +20,10 @@
 # bifrost-agent-key its Job uses, which the SraGateway instance and
 # the Bifrost graph (bifrost/rgd.yaml) make first. Applied by setup.sh with the other two graphs.
 #
-# Never remove a field from spec.schema once this RGD is live: kro refuses the
-# instance CRD update and the instance stops reconciling, deletion included
-# (seen in a live test of the other graphs).
+# Never make a breaking schema change once this RGD is live (remove a field, add
+# a required field without a default, change a type): kro refuses the instance
+# CRD update and the instance stops reconciling, deletion included (seen in a
+# live test of the other graphs, on a removed field).
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
 metadata:
@@ -35,14 +37,14 @@ spec:
       # agent: headless Claude Code with the prompt; tools: list the gateway's
       # tools and call each one probeCalls names (agent/run.sh).
       mode: string | required=true
-      probeCalls: string | default=""
+      probeCalls: string
       # The host agent/run.sh's egress gate waits to fail to reach.
-      egressCanary: string | default="example.com"
+      egressCanary: string | required=true
       image: string | required=true
       runBucket: string | required=true
       region: string | required=true
       # The namespace Bifrost runs in, and the model the agent's key may call.
-      bifrostNamespace: string | default="bfx"
+      bifrostNamespace: string | required=true
       modelID: string | required=true
   resources:
     - id: job
@@ -120,5 +122,5 @@ spec:
                 - { name: home, emptyDir: {} }
                 - { name: work, emptyDir: {} }
                 - { name: tmp, emptyDir: {} }
-                # The agent's Bifrost key, which bifrost/apply.sh copies into this namespace.
+                # The agent's Bifrost key, which the Bifrost graph (bifrost/rgd.yaml, agentKeyCopy) copies into this namespace.
                 - { name: vk, secret: { secretName: bifrost-agent-key, defaultMode: 0440 } }

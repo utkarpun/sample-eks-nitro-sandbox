@@ -7,8 +7,10 @@
 # namespace.
 # The Bifrost Deployment itself comes from the official Helm chart (values.yaml);
 # kro has no Helm resource, so apply.sh installs the chart once this instance is
-# ACTIVE. The four Secrets stay made by apply.sh: their values must be secret, and a
-# kro graph cannot make a secret value.
+# ACTIVE. The four Secrets stay made by apply.sh: their values must be secret, and
+# kro's only generator, `random.seededString`, is deterministic from a seed anyone
+# who can read the instance can read, so a graph cannot make a secret value (kro
+# CEL libraries, https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md).
 #
 # Cluster scoped: the instance has no namespace, since it is the thing that makes
 # the namespace (as kro/base-rgd.yaml does for sra). Every namespaced child names
@@ -279,7 +281,9 @@ spec:
           namespace: ${ns.metadata.name}
 
     # The same key in the agent's namespace, for the agent to read
-    # (kro/run-rgd.yaml mounts it).
+    # (kro/run-rgd.yaml mounts it). kro reads a Secret's data as bytes and does not
+    # put bytes in a template, so the copy encodes them back to base64, the form
+    # kro's CEL libraries page gives for a Secret.
     - id: agentKeyCopy
       template:
         apiVersion: v1
@@ -288,4 +292,4 @@ spec:
           name: bifrost-agent-key
           namespace: ${schema.spec.agentNamespace}
         data:
-          key: ${agentKey.data.?key}
+          key: ${base64.encode(agentKey.data.key)}

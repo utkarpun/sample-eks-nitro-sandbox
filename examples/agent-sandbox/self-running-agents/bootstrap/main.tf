@@ -186,7 +186,10 @@ resource "kubernetes_cluster_role_v1" "kro" {
     resources  = ["networkpolicies"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
-  # The example's instance kinds (kro/base-rgd.yaml SraBase, kro/gateway-rgd.yaml SraGateway).
+  # SraBase and SraGateway (kro/base-rgd.yaml, kro/gateway-rgd.yaml). AmazonEKSKROPolicy
+  # already grants kro every kro.run resource (EKS User Guide, access policy
+  # permissions), which covers all four of the example's kinds (SraRun and
+  # BifrostBackend too), so this rule adds nothing to it.
   rule {
     api_groups = ["kro.run"]
     resources  = ["srabases", "srabases/status", "srabases/finalizers", "sragateways", "sragateways/status", "sragateways/finalizers"]

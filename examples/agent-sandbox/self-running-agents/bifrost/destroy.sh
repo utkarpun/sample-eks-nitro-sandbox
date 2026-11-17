@@ -9,28 +9,36 @@ source "$(dirname "$0")/lib.sh"
 incomplete=0
 fail() { echo "$*" >&2; incomplete=1; }
 
+ns_ours=0
 rc=0; resource_exists kc_cluster namespace "$BIFROST_NAMESPACE" || rc=$?
 case $rc in
   2) fail "could not read namespace $BIFROST_NAMESPACE, so nothing in it was removed" ;;
   0)
     namespace_is_ours "$BIFROST_NAMESPACE" "$BF_MANAGED_BY" \
       || die "namespace $BIFROST_NAMESPACE is not labelled app.kubernetes.io/managed-by=$BF_MANAGED_BY, so nothing in it is touched"
+    ns_ours=1
     if hc -n "$BIFROST_NAMESPACE" status bifrost >/dev/null 2>&1; then
       if hc -n "$BIFROST_NAMESPACE" uninstall bifrost --wait --timeout 5m >/dev/null; then echo "release bifrost removed"
       else fail "the release bifrost was not removed"; fi
     fi
-    if [[ -n "$(kc_cluster get bifrostbackend bifrost --ignore-not-found -o name 2>/dev/null)" ]]; then
-      echo "deleting the graph (the RDS instance is most of the wait)"
-      kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time"
-    fi
-    # The instance delete has removed the namespace; this removes one left without
-    # an instance (it carries the label, so it is the sample's).
-    if [[ $incomplete -eq 0 ]]; then
-      if kc_cluster delete namespace "$BIFROST_NAMESPACE" --ignore-not-found --wait --timeout=300s >/dev/null; then echo "namespace $BIFROST_NAMESPACE removed"
-      else fail "namespace $BIFROST_NAMESPACE was not removed"; fi
-    fi
     ;;
 esac
+
+# The instance is cluster scoped, so it can outlive the namespace (apply.sh dies at
+# its namespace wait after applying it): delete it whether or not the namespace is there.
+rc=0; resource_exists kc_cluster bifrostbackend bifrost || rc=$?
+case $rc in
+  0) echo "deleting the graph (the RDS instance is most of the wait)"
+     kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time" ;;
+  2) fail "could not read the graph instance bifrost, so it may be left" ;;
+esac
+
+# The instance delete has removed the namespace; this removes one left without
+# an instance (it carries the label, so it is the sample's).
+if [[ $ns_ours -eq 1 && $incomplete -eq 0 ]]; then
+  if kc_cluster delete namespace "$BIFROST_NAMESPACE" --ignore-not-found --wait --timeout=300s >/dev/null; then echo "namespace $BIFROST_NAMESPACE removed"
+  else fail "namespace $BIFROST_NAMESPACE was not removed"; fi
+fi
 
 # The agent's copy of the key, which the instance delete removes; this removes one
 # left without an instance, only in the sample's own namespace.
@@ -42,13 +50,16 @@ case $rc in
   2) fail "could not read namespace $AGENT_NAMESPACE, so its Secret bifrost-agent-key may be left" ;;
 esac
 
-# The graph definition is this sample's; remove it only when no instance is left.
+# The graph definition is this sample's; remove it only when no instance is left,
+# then the instance kind's CRD, which kro leaves behind.
 rc=0; resource_exists kc_cluster rgd bifrost-backend || rc=$?
 case $rc in
   0) if left="$(kc_cluster get bifrostbackends -A -o name 2>/dev/null)"; then
        if [[ -z "$left" ]]; then
-         kc_cluster delete -f "$BF_DIR/rgd.yaml" >/dev/null || fail "the graph definition bifrost-backend was not removed"
-       fi
+         if kc_cluster delete -f "$BF_DIR/rgd.yaml" >/dev/null; then
+           kc_cluster delete crd bifrostbackends.kro.run --ignore-not-found >/dev/null || fail "the CRD bifrostbackends.kro.run was not removed"
+         else fail "the graph definition bifrost-backend was not removed"; fi
+       else fail "BifrostBackends are left ($left), so the graph definition bifrost-backend is kept"; fi
      else fail "could not list BifrostBackends, so the graph definition bifrost-backend is left"; fi ;;
   2) fail "could not read the graph definition bifrost-backend" ;;
 esac
@@ -65,6 +76,15 @@ k8s_gone() {  # <what> <get arguments...>
 }
 k8s_gone "namespace $BIFROST_NAMESPACE" namespace "$BIFROST_NAMESPACE"
 k8s_gone "Secret $AGENT_NAMESPACE/bifrost-agent-key" -n "$AGENT_NAMESPACE" secret bifrost-agent-key
+k8s_gone "graph definition bifrost-backend" rgd bifrost-backend
+# With its CRD gone the instance kind cannot be read, and no instance is left.
+rc=0; resource_exists kc_cluster crd bifrostbackends.kro.run || rc=$?
+case $rc in
+  1) echo "  CRD bifrostbackends.kro.run is gone, and with it bifrostbackend/bifrost" ;;
+  0) fail "  INCOMPLETE: CRD bifrostbackends.kro.run is still present"
+     k8s_gone "bifrostbackend/bifrost" bifrostbackend bifrost ;;
+  *) fail "  INCOMPLETE: could not determine whether CRD bifrostbackends.kro.run is gone" ;;
+esac
 # Counts are of IDs, so a paged list still sums to one number.
 sg_count() {
   local vpc

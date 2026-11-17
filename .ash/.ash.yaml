@@ -167,18 +167,10 @@ global_settings:
       path: 'examples/storage/efs/deploy/efs.yaml'
       reason: 'Pods carry app: efs-shared, selected by the ApplicationNetworkPolicy in deploy/egress-policy.yaml'
       expiration: '2027-12-31'
-    - rule_id: CKV2_K8S_6
-      path: 'examples/agent-sandbox/self-running-agents/deploy/run-job.yaml'
-      reason: 'Pods carry app.kubernetes.io/name: agent, selected by the ApplicationNetworkPolicy in deploy/egress.yaml'
-      expiration: '2027-12-31'
-    - rule_id: CKV_K8S_14
-      path: 'examples/agent-sandbox/self-running-agents/deploy/run-job.yaml'
-      reason: 'Image placeholder <IMAGE>; scripts/run.sh renders it with a content-hash tag (common.sh image_tag)'
-      expiration: '2027-12-31'
-    - rule_id: CKV_K8S_40
-      path: 'examples/agent-sandbox/self-running-agents/deploy/run-job.yaml'
-      reason: 'uid 1000 is the node user the base image ships; HOME and the emptyDir ownership depend on it (Dockerfile USER node)'
-      expiration: '2027-12-31'
+    # self-running-agents: the run's pod spec is inside the kro graph
+    # kro/run-rgd.yaml, whose nested Job template Checkov does not parse, so
+    # Checkov does not scan it (runAsNonRoot, seccomp, drop ALL and
+    # readOnlyRootFilesystem there go unchecked) and it needs no suppression.
     - rule_id: CKV2_K8S_6
       path: 'examples/storage/s3-files/deploy/s3-files.yaml'
       reason: 'Pods carry app: s3-files-shared, selected by the ApplicationNetworkPolicy in deploy/egress-policy.yaml'

@@ -9,11 +9,11 @@ metadata:
   labels: { self-running-agents/run: "<RUN_ID>" }
 spec:
   runID: "<RUN_ID>"
-  mode: <RUN_MODE>
+  mode: "<RUN_MODE>"
   probeCalls: "<PROBE_CALLS>"
-  egressCanary: <EGRESS_CANARY>
-  image: <IMAGE>
-  runBucket: <RUN_BUCKET>
-  region: <AWS_REGION>
-  bifrostNamespace: <BIFROST_NAMESPACE>
-  modelID: <BEDROCK_MODEL_ID>
+  egressCanary: "<EGRESS_CANARY>"
+  image: "<IMAGE>"
+  runBucket: "<RUN_BUCKET>"
+  region: "<AWS_REGION>"
+  bifrostNamespace: "<BIFROST_NAMESPACE>"
+  modelID: "<BEDROCK_MODEL_ID>"

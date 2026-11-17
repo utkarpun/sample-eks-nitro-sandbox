@@ -31,7 +31,7 @@ VPC_CIDR="$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --query 'Vpcs[0].CidrBlock
 echo "cluster $CLUSTER_NAME: account $ACCOUNT_ID, VPC $VPC_ID ($VPC_CIDR), subnets $SUBNETS"
 
 # 3. The graph definition. It makes Bifrost's namespace, so a namespace of that
-#    name that no BifrostBackend of ours made is someone else's. The agent's
+#    name that is already there must carry the sample's label. The agent's
 #    namespace must be the sample's (made by ./scripts/setup.sh).
 kc_cluster apply -f "$BF_DIR/rgd.yaml" >/dev/null
 kc_cluster wait --for=jsonpath='{.status.state}'=Active rgd/bifrost-backend --timeout=120s >/dev/null \
@@ -40,12 +40,7 @@ namespace_is_ours "$AGENT_NAMESPACE" "$SAMPLE" \
   || die "namespace $AGENT_NAMESPACE is missing or not labelled app.kubernetes.io/managed-by=$SAMPLE; run ./scripts/setup.sh first"
 rc=0; resource_exists kc_cluster namespace "$BIFROST_NAMESPACE" || rc=$?
 case $rc in
-  0) irc=0; resource_exists kc_cluster bifrostbackend bifrost || irc=$?
-     case $irc in
-       1) die "namespace $BIFROST_NAMESPACE exists and no BifrostBackend bifrost made it, so it is not this sample's" ;;
-       2) die "could not read BifrostBackend bifrost; stopping rather than guess" ;;
-     esac
-     namespace_is_ours "$BIFROST_NAMESPACE" "$BF_MANAGED_BY" \
+  0) namespace_is_ours "$BIFROST_NAMESPACE" "$BF_MANAGED_BY" \
        || die "namespace $BIFROST_NAMESPACE is not labelled app.kubernetes.io/managed-by=$BF_MANAGED_BY, so it is not this sample's" ;;
   2) die "could not read namespace $BIFROST_NAMESPACE; stopping rather than guess" ;;
 esac

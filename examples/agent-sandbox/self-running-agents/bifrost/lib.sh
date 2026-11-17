@@ -11,9 +11,10 @@ source "$BF_DIR/../scripts/common.sh"
 # Fixed names, inside bootstrap/'s scope (bootstrap/variables.tf): rds_prefix "bfx"
 # (the RDS instance, its subnet group and the bfx-* role), secret_namespaces "bfx"
 # (the rds controller reads the database password Secret only there) and the
-# security group's ManagedBy "bfx". instance.yaml carries the same names (its
-# graph makes the namespace); change them together with those variables.
-BIFROST_NAMESPACE=bfx
+# security group's ManagedBy "bfx". The namespace is common.sh's BIFROST_NAMESPACE,
+# which instance.yaml gets as a placeholder; instance.yaml's prefix and managedBy
+# and scripts/test.sh's BIFROST_ROLE carry the other two. Change them all together
+# with those variables (bifrost/README.md lists every site).
 BF_PREFIX=bfx
 BF_MANAGED_BY=bfx
 # The agent pods' namespace is the sample's own (common.sh NAMESPACE, made by kro/base.yaml).

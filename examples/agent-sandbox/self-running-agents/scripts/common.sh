@@ -160,7 +160,7 @@ load_status() {
     || die "SraBase reads '${st:-<none>}' and SraGateway '${gst:-<none>}', not both ACTIVE; run ./scripts/setup.sh"
   [[ -n "$NAMESPACE" && -n "$RUN_BUCKET" && -n "$REPOSITORY_URI" && -n "$BEDROCK_MODEL_ID" ]] \
     || die "an instance status field is empty; run ./scripts/setup.sh"
-  # A run's model calls need the key bifrost/apply.sh puts here (kro/run-rgd.yaml).
+  # A run's model calls need the key the Bifrost graph (bifrost/rgd.yaml, agentKeyCopy) copies here (kro/run-rgd.yaml).
   resource_exists kc secret bifrost-agent-key \
     || die "Secret $NAMESPACE/bifrost-agent-key is missing or unreadable; run ./bifrost/apply.sh first"
 }
