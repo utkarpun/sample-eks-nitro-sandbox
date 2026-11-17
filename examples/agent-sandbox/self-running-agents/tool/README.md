@@ -15,7 +15,7 @@ answer it, and the gateway never lets it through.
 
 The gateway names the tool in the call's client context as `<target>___<tool>`. The function
 prints one log line per call naming the tool, so its log shows which calls the gateway let
-through (`test.sh` reads it).
+through.
 
 ## How it gets deployed
 

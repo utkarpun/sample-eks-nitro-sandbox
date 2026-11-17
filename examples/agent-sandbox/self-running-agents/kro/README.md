@@ -101,10 +101,9 @@ immutable field as an error. One instance per run.
   tightening a pattern, enum or limit ([kro's full list](https://github.com/kubernetes-sigs/kro/blob/v0.10.0/pkg/graph/crd/compat/schema.go)).
   kro refuses the change and the instance stops reconciling, deletion included. Run
   `scripts/cleanup.sh` first.
-- **A setup that never reaches ACTIVE.** `setup.sh` then prints each ACK object's state. A
-  gateway made a moment after its role can fail IAM propagation, and ACK does not retry an
-  `ACK.Terminal` error. The graph makes the gateway role first to avoid it, which is a timing
-  fix, not a guarantee. Run `cleanup.sh`, then `setup.sh` again.
+- **A setup that never reaches ACTIVE.** `setup.sh` then prints each ACK object's state. One
+  cause is IAM propagation ([`AGENTCORE.md`](AGENTCORE.md#things-to-know)). Run `cleanup.sh`,
+  then `setup.sh` again.
 - **Changing the prompt.** Edit the `prompt` field in `gateway.yaml`, which the graph puts
   in the agent's ConfigMap, then run `setup.sh`. `agent/prompt.txt` is a reference copy;
   editing it rebuilds the image but not the prompt.

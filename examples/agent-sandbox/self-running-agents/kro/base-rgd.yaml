@@ -9,12 +9,7 @@
 # the namespace. Every namespaced child names its namespace, and the ACK objects
 # reference the Namespace so kro deletes them before it.
 #
-# Never make a breaking schema change once this graph's CRD exists: one that
-# removes or narrows what an instance may hold, such as removing a field,
-# changing a type, adding a required field with no default, making a field
-# required, or adding or tightening a pattern, enum or limit (kro's full list:
-# pkg/graph/crd/compat/schema.go). kro refuses the CRD update and the instance
-# stops reconciling, deletion included (seen in a live test, on a removed field).
+# Never make a breaking schema change once this graph's CRD exists: see kro/README.md.
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
 metadata:

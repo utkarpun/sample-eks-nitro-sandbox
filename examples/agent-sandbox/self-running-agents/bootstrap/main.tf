@@ -7,7 +7,7 @@ locals {
   vpc_id  = data.aws_eks_cluster.this.vpc_config[0].vpc_id
   cluster = data.aws_eks_cluster.this.arn
   role    = "${var.prefix}-capability"
-  # Roles, functions, log groups, buckets and repositories the graphs make.
+  # Roles, functions, log groups and buckets the graphs make.
   w   = "${var.prefix}-*"
   rds = "${var.rds_prefix}-*"
   # Security groups ACK may change: tagged ManagedBy=<prefix> or <rds_prefix>.
@@ -67,7 +67,7 @@ resource "aws_iam_role_policy" "ack" {
       { Sid = "Buckets", Effect = "Allow", Action = ["s3:*"], Resource = ["arn:aws:s3:::${local.w}", "arn:aws:s3:::${local.w}/*"] },
       { Sid = "ListBucketsIsStarOnly", Effect = "Allow", Action = ["s3:ListAllMyBuckets"], Resource = "*" },
       # kro/base-rgd.yaml names the repository plain ${var.prefix}, which sra-* does not match.
-      { Sid = "Repositories", Effect = "Allow", Action = ["ecr:*"], Resource = ["arn:aws:ecr:${var.region}:${local.account}:repository/${var.prefix}", "arn:aws:ecr:${var.region}:${local.account}:repository/${local.w}"] },
+      { Sid = "Repositories", Effect = "Allow", Action = ["ecr:*"], Resource = ["arn:aws:ecr:${var.region}:${local.account}:repository/${var.prefix}"] },
       # RDS for the Bifrost unit: instances and subnet groups by name; creating
       # an instance also names the default option and parameter groups.
       {

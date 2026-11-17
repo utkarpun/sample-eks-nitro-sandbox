@@ -28,7 +28,7 @@ from mcp_proxy_for_aws.client import aws_iam_streamablehttp_client
 
 async def main(cfg_path, names):
     endpoint = json.load(open(cfg_path))["mcpServers"]["gateway"]["args"][0]
-    out = {"endpoint_host": endpoint.split("/")[2], "listed": [], "calls": []}
+    out = {"listed": [], "calls": []}
     async with aws_iam_streamablehttp_client(
         endpoint, aws_service="bedrock-agentcore", aws_region=os.environ["AWS_REGION"]
     ) as (read, write, _):

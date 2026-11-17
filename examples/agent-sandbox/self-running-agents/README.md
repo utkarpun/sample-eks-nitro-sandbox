@@ -46,8 +46,8 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 
 **What it costs.** Beyond the cluster: the Bedrock tokens the agent spends, the gateway's
 tool calls, one Lambda call per tool call, and the node EKS Auto Mode starts for the
-sandbox pod when no node has room (the pod asks for 1 vCPU and 2Gi). Between runs: the
-image in ECR, the objects in the run bucket, and Bifrost's PostgreSQL database on Amazon
+sandbox pod when no node has room (the pod asks for 1 vCPU and 2Gi). Between runs:
+Bifrost's pod and the node it runs on, the image in ECR, the objects in the run bucket, and Bifrost's PostgreSQL database on Amazon
 RDS, which bills until `bifrost/destroy.sh` ends with `clean up complete`
 ([what it costs](bifrost/README.md#what-it-costs)).
 
@@ -129,7 +129,8 @@ The output on this page will come from one fresh run on a cluster that had none 
 sample's resources. The account id is replaced with `<ACCOUNT_ID>`, the cluster name with
 `<CLUSTER_NAME>`, and the generated ids of the gateway, the policy engine and the Pod
 Identity association with `<id>`; long blocks are abridged where marked. The `sra:`
-prefix on the pod's own lines is fixed in `agent/run.sh`.
+prefix on the pod's own lines is fixed in `agent/run.sh`. The `SraRun` form of the run has
+not yet run on a cluster.
 
 **Make the cluster** (skip this on your own cluster). Give your own address for the API
 endpoint. Details, and why two applies: [`cluster/`](cluster/README.md).
@@ -171,8 +172,9 @@ cp .env.example .env
 ```
 
 `KUBE_CONTEXT` must be the context of `CLUSTER_NAME`: the Pod Identity association is made
-on `CLUSTER_NAME` and the pods run on the context, so a mismatch is a run with no
-credentials. After `aws eks update-kubeconfig`, the context is the cluster's ARN, which
+on `CLUSTER_NAME` and the pods run on the context. On a mismatch the pods get no
+credentials, and the scripts apply and delete the sample's graphs on the context's cluster;
+nothing checks that the two match. After `aws eks update-kubeconfig`, the context is the cluster's ARN, which
 `kubectl config current-context` prints. Set `AWS_PROFILE` too if the cluster's account is
 not your CLI's default.
 
@@ -311,9 +313,8 @@ Management*](https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-
 
 **Every tool call is decided outside the sandbox.** The gateway knows the caller by its
 SigV4 signature and asks a Cedar policy, which permits only `clock___get_time` for the
-agent's role. Cedar denies by default. Whoever can change the gateway
-(`bedrock-agentcore:UpdateGateway`, which the ACK role holds, or an edit of the gateway
-graph) can switch the policy engine to `LOG_ONLY` or remove it. Inside the pod, Claude
+agent's role. Cedar denies by default. Whoever can change the gateway can turn the policy
+off. Inside the pod, Claude
 Code's built-in tools are off (`--tools ""`) and `agent/settings.json` allows only the
 gateway. More: [`kro/AGENTCORE.md`](kro/AGENTCORE.md).
 
@@ -375,14 +376,8 @@ anyone else create pods in the namespace.
   `sraruns` to yourself too, and `create` on `bifrostbackends` to cluster admins: an
   instance can make, label and later delete the namespace it names and write the agent's
   key into the namespace `agentNamespace` names.
-- **Whoever can create ACK objects holds the ACK role.** ACK holds `iam:*` on `sra-*` and
-  `bfx-*` roles with no permissions boundary, and `bedrock-agentcore:*` in this Region.
-  Whoever can create ACK kinds or `resourcegraphdefinitions` can make an admin role and change
-  the gateway's policy engine. Keep those rights to cluster admins
+- **Whoever can create ACK objects holds the ACK role**, which can make an admin role
   ([`bootstrap/`](bootstrap/README.md)).
-- **The policy engine's mode.** Nothing stops a change of the gateway to `LOG_ONLY`; keep
-  edits of `gateway-rgd.yaml` and the ACK `Gateway` kind to cluster admins
-  ([`kro/AGENTCORE.md`](kro/AGENTCORE.md#things-to-know)).
 - **Instance metadata.** An isolated sandbox runs its own IMDSv2 service at
   `169.254.169.254`, inside the sandbox, so the egress rule does not reach it. It serves only
   the Region, Availability Zone, Availability Zone ID, services domain and partition, and 404
@@ -413,6 +408,6 @@ tool that runs code or opens a connection.
 | Terraform providers | `hashicorp/aws` 6.73.0, `hashicorp/kubernetes` 3.5.0 (`bootstrap/` and `cluster/` lock files) |
 | Terraform modules (`cluster/`) | `terraform-aws-modules/vpc/aws` 6.7.3, `terraform-aws-modules/eks/aws` 21.29.0 |
 | Bifrost Helm chart | `2.1.48` (`bifrost/lib.sh`) |
-| kro and ACK capabilities | EKS managed; this run: `TODO: output from the fresh run` (`terraform output kro_version && terraform output ack_version`) |
+| kro and ACK capabilities | EKS managed; this run: `TODO: output from the fresh run` (`terraform -chdir=bootstrap output kro_version && terraform -chdir=bootstrap output ack_version`) |
 | EKS | Auto Mode; this run: `TODO: output from the fresh run` |
 | AWS CLI | `TODO: output from the fresh run` for this run |

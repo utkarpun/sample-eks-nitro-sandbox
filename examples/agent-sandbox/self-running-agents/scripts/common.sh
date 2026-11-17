@@ -29,7 +29,7 @@ done
 # already set in the environment wins over the file.
 _ENV_KEYS='CLUSTER_NAME|AWS_REGION|AWS_PROFILE|KUBE_CONTEXT|BEDROCK_MODEL_ID|PROJECT_TAG|KUBECTL'
 if [[ -f "$SAMPLE_DIR/.env" && ! -r "$SAMPLE_DIR/.env" ]]; then
-  echo "error: $SAMPLE_DIR/.env exists but is not readable; fix its permissions and re-run" >&2
+  echo "error: the sample's .env exists but is not readable; fix its permissions and re-run" >&2
   exit 1
 fi
 if [[ -f "$SAMPLE_DIR/.env" ]]; then
@@ -122,7 +122,7 @@ require_network_policy_enforcement() {
   local v cm=0 rc=0 crd=0
   local off="It is a cluster-wide setting, so this script does not change it. Turn it on yourself.
   On a cluster made by this sample's cluster/, where the ConfigMap is Terraform's, with the same -var values you made it with:
-  terraform -chdir=$SAMPLE_DIR/cluster apply -var 'endpoint_public_access_cidrs=[\"<your IP>/32\"]'
+  terraform -chdir=cluster apply -var 'endpoint_public_access_cidrs=[\"<your IP>/32\"]'
   On your own cluster:"
   resource_exists kc_cluster -n kube-system configmap amazon-vpc-cni || cm=$?
   case $cm in

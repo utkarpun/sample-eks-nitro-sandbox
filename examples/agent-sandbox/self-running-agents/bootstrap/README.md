@@ -22,7 +22,7 @@ and then the sample's `scripts/setup.sh` and `bifrost/apply.sh` again.
 
 **What ACK may touch.** The policy names what the graphs make: IAM roles named `sra-*` and
 `bfx-*` (never `sra-capability` itself), Lambda functions, log groups and S3 buckets named
-`sra-*`, the ECR repository `sra` (and `sra-*`), any AgentCore resource in this account and
+`sra-*`, the ECR repository `sra`, any AgentCore resource in this account and
 Region (their ids are generated), Pod Identity associations on this cluster, RDS instances
 and subnet groups named `bfx-*`, and security groups tagged `ManagedBy=sra` or `bfx` (made
 only in the cluster's VPC). ACK holds `iam:*` on `sra-*` and `bfx-*` roles with no

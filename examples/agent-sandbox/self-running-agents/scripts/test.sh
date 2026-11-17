@@ -129,5 +129,5 @@ printf '%s\n---\n%s\n' "$bad" "$good" > "$LOG_DIR/NC3.log"
 verdict NC3 $? "token on: $(tr '\n' ' ' <<<"$bad" | cut -c1-200) | token off: $good"
 
 echo
-echo "checks: $PASSES PASS, $FAILS FAIL (logs in $LOG_DIR)"
+echo "checks: $PASSES PASS, $FAILS FAIL (logs in ${LOG_DIR#"$SAMPLE_DIR/../../../"})"
 [[ $FAILS -eq 0 ]]

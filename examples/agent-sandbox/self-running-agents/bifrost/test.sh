@@ -117,7 +117,7 @@ verdict BQ-3 $([[ "$r" == 1 && $np -eq 0 ]]; echo $?) "ready replicas ${r:-0} wi
 caller bifrost-caller bifrost; caller bifrost-caller-other default
 /usr/bin/grep -q ":assumed-role/$BF_PREFIX-bifrost/" "$LOG_DIR/bifrost-caller.log"; c1=$?
 /usr/bin/grep -q ":assumed-role/" "$LOG_DIR/bifrost-caller-other.log"; c2=$?
-verdict CALLER $([[ $c1 -eq 0 && $c2 -ne 0 ]]; echo $?) "bifrost ServiceAccount: $(tail -1 "$LOG_DIR/bifrost-caller.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/'); default ServiceAccount: $(tail -1 "$LOG_DIR/bifrost-caller-other.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/')"
+verdict CALLER $([[ $c1 -eq 0 && $c2 -ne 0 ]]; echo $?) "bifrost ServiceAccount: $(tail -1 "$LOG_DIR/bifrost-caller.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/g; s|(assumed-role/[^/]+/).*|\1<session>|'); default ServiceAccount: $(tail -1 "$LOG_DIR/bifrost-caller-other.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/g; s|(assumed-role/[^/]+/).*|\1<session>|')"
 
 # IAM: the role's own policy, simulated; no call is made.
 prof="arn:aws:bedrock:$AWS_REGION:$ACCOUNT_ID:inference-profile/$MODEL"

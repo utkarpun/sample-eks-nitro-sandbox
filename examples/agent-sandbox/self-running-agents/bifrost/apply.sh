@@ -14,7 +14,7 @@ for crd in resourcegraphdefinitions.kro.run securitygroups.ec2.services.k8s.aws 
   rc=0; resource_exists kc_cluster crd "$crd" || rc=$?
   case $rc in
     1) die "CRD $crd is not on this cluster. Turn on the sample's kro and ACK capabilities first (README, Before you start):
-  terraform -chdir=$SAMPLE_DIR/bootstrap init && terraform -chdir=$SAMPLE_DIR/bootstrap apply -var cluster_name=$CLUSTER_NAME -var region=$AWS_REGION" ;;
+  terraform -chdir=bootstrap init && terraform -chdir=bootstrap apply -var cluster_name=$CLUSTER_NAME -var region=$AWS_REGION" ;;
     2) die "could not read the cluster's CRDs; stopping rather than guess" ;;
   esac
 done
