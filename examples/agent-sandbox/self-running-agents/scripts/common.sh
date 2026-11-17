@@ -4,8 +4,8 @@
 #
 # Every AWS resource is made by ACK from the kro graphs (kro/ and bifrost/rgd.yaml); these
 # scripts only apply them, wait, read their status, and read AWS back.
-# Every kubectl call goes through kc() or kc_cluster(), which pin --context, so
-# a run never depends on the machine's current context.
+# Every kubectl call goes through kc() or kc_cluster(), which pin --context when
+# KUBE_CONTEXT is set; without it a run uses the machine's current context.
 set -euo pipefail
 
 SAMPLE=self-running-agents

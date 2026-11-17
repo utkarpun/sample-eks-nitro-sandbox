@@ -4,7 +4,7 @@
 # from the run's own output, and the raw output is kept in LOG_DIR.
 #
 #   T    the agent's get_time call was answered without error, and its final answer has the time-in-utc: form with the time the tool returned;
-#        the agent has no Bedrock permission and no bedrock-runtime egress, so a pass also shows its model calls went through Bifrost (T-B1)
+#        the agent has no Bedrock permission and no bedrock-runtime egress, so a pass also shows its model calls went through Bifrost
 #   T2   outside the model, the gateway lists only get_time for the agent's role and answers it
 #   NC1  in the T run, the egress gate's connections to a host the egress rule does not name failed
 #   NC2  a call to get_host_info, which the Cedar policy does not permit, is refused by the gateway

@@ -38,8 +38,8 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
   VPC, an EKS cluster, its IAM roles, KMS key and log group),
   [`bootstrap/`](bootstrap/README.md) (an IAM role, EKS capabilities, an access policy
   association, and a ClusterRole on the cluster) and the scripts (read the cluster, push to
-  the sample's ECR repository, write and empty its run bucket, apply kro graphs, and
-  simulate IAM roles for `test.sh`). Every other AWS resource is made by the ACK
+  the sample's ECR repository, write and empty its run bucket, apply kro graphs, read back
+  each AWS resource the clean up removes, and simulate IAM roles for `test.sh`). Every other AWS resource is made by the ACK
   capability's role.
 - **Bedrock and AgentCore.** Access to the Bedrock model in `.env`, and AgentCore Gateway
   and AgentCore Policy in your Region (written for `us-west-2`).
@@ -148,8 +148,9 @@ cd ..
 TODO: output from the fresh run
 ```
 
-**Step 0: turn on kro and ACK.** Once per cluster. After a pull, run Step 0, Step 2 and
-Step 2b again. On the `cluster/` path `<CLUSTER_NAME>` is `sandbox-demo`, unless you set
+**Step 0: turn on kro and ACK.** Once per cluster. After a pull, delete any leftover
+`SraRun` (`kubectl --context <KUBE_CONTEXT> -n sra delete sraruns --all`), then run Step 0,
+Step 2 and Step 2b again. On the `cluster/` path `<CLUSTER_NAME>` is `sandbox-demo`, unless you set
 `cluster_name`. Details: [`bootstrap/`](bootstrap/README.md).
 
 ```bash
@@ -227,8 +228,8 @@ each refusal. What each check proves: [`scripts/`](scripts/README.md#what-testsh
 TODO: output from the fresh run
 ```
 
-The tool function's own log shows that only `get_time` reached it (at least 3 from
-`test.sh`; one more if you ran Step 3 first):
+The tool function's own log shows that only `get_time` reached it (at least 3 from a
+`test.sh` whose NC-B1 passed; one more if you ran Step 3 first):
 
 ```text
 TODO: output from the fresh run
@@ -298,13 +299,15 @@ of reads that prove everything is gone is in
 
 ## Design
 
-**Terraform for the base, Helm for other people's charts, kro for ours.** Every resource
+**Terraform for the base, Helm for other people's charts, kro for ours.** The cluster and
+the kro and ACK capabilities are Terraform (`cluster/`, `bootstrap/`); Bifrost runs from its
+Helm chart. Every resource
 that is ours, in AWS and in the cluster, is a kro graph whose AWS objects the AWS
 Controllers for Kubernetes (ACK) make; both controllers are EKS managed capabilities. The
 one exception is Bifrost's four Secrets, which `bifrost/apply.sh` makes
 ([why](bifrost/README.md#what-is-in-this-folder)).
 
-**One narrow role per piece.** The agent pod's ServiceAccount maps to one IAM role through
+**One narrow role per workload pod.** The agent pod's ServiceAccount maps to one IAM role through
 EKS Pod Identity. That role may call `bedrock-agentcore:InvokeGateway` on the one gateway
 and put objects under `runs/` in the run bucket, nothing else. The model calls go through
 Bifrost, whose own role holds the Bedrock permission. This follows the EKS Best Practices
@@ -341,8 +344,8 @@ anyone else create pods in the namespace.
   that shares an address with an allowed name is reachable too (Amazon EKS User Guide,
   [*Use Network Policies with EKS Auto Mode*](https://docs.aws.amazon.com/eks/latest/userguide/auto-net-pol.html)).
   On this cluster the learned addresses were shared by every pod on the node. Every S3
-  bucket in the Region shares the run bucket's addresses, and a public bucket can be read
-  and written with no role.
+  bucket in the Region shares the run bucket's addresses, and a bucket whose policy lets
+  anyone read or write it needs no role.
 - **DNS is open.** Port 53 is allowed to any address, and every name still resolved from an
   agent pod, so treat DNS as a channel out. The EKS Best Practices Guide's example allows
   DNS only to `kube-dns` ([*Network
@@ -373,9 +376,11 @@ anyone else create pods in the namespace.
   credentials and the cluster's default egress (`DefaultAllow` here). Keep `create pods` in
   the namespace to yourself. Creating a `SraRun` gives the same: kro makes its Job, and any
   `image` runs as `agent` with its Pod Identity role and the Bifrost key. Keep `create` on
-  `sraruns` to yourself too, and `create` on `bifrostbackends` to cluster admins: an
-  instance can make, label and later delete the namespace it names and write the agent's
-  key into the namespace `agentNamespace` names.
+  `sraruns` to yourself too, and `create` on `bifrostbackends` and `update` on `sragateways`
+  to cluster admins: a `BifrostBackend` can make, label and later delete the namespace it
+  names and write the agent's key into the namespace `agentNamespace` names, and an
+  `SraGateway`'s `bifrostNamespace` and `prompt` set where the agent's model calls go and
+  what it is told.
 - **Whoever can create ACK objects holds the ACK role**, which can make an admin role
   ([`bootstrap/`](bootstrap/README.md)).
 - **Instance metadata.** An isolated sandbox runs its own IMDSv2 service at

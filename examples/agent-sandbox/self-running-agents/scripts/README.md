@@ -69,8 +69,9 @@ with it. Then it prints the Job's verdict and deletes the `SraRun` and the pod.
   `get_host_info` with a JSON-RPC error.
 - NC1 reads the gate line of T's own run, so it passes whenever T's run got past the gate;
   the seven checks are six independent outcomes.
-- On EKS Auto Mode an allow learned for one pod is shared with every pod on its node, so on a
-  node that also runs Bifrost NC-B1's network leg can fail while its IAM leg holds.
+- On the cluster this sample was written on, an allow learned for one pod was shared with
+  every pod on its node, so on a node that also runs Bifrost NC-B1's network leg can fail
+  while its IAM leg holds.
 - Not covered: callers other than the agent role, hosts other than `example.com`, a pod
   without the agent label, a pod without `runtimeClassName: isolated-sandbox`, and the Pod
   Identity token, which the pod does hold.
@@ -104,8 +105,10 @@ kubectl get <kind> -A -o custom-columns=NAME:.metadata.name,DELETING:.metadata.d
 The recovery depends on which is gone. These steps have not been run live.
 
 - **kro gone, ACK running:** do not delete in AWS by hand. kro no longer deletes its ACK
-  objects, and ACK makes an AWS object again when it reads it as deleted. Delete the ACK
-  objects with kubectl, Bifrost's in `bfx` and the sample's in `sra`:
+  objects, and ACK makes an AWS object again when it reads it as deleted. Empty the run
+  bucket first (`aws s3 rm s3://sra-runs-<ACCOUNT_ID>-<Region> --recursive`), since S3 does
+  not delete a bucket with objects in it, then delete the ACK objects with kubectl,
+  Bifrost's in `bfx` and the sample's in `sra`:
 
   ```bash
   kubectl -n bfx delete --all dbinstances.rds.services.k8s.aws,dbsubnetgroups.rds.services.k8s.aws,securitygroups.ec2.services.k8s.aws,roles.iam.services.k8s.aws,podidentityassociations.eks.services.k8s.aws
@@ -141,7 +144,7 @@ C=<CLUSTER_NAME>; R=us-west-2
 | `aws s3api head-bucket --bucket sra-runs-<ACCOUNT_ID>-$R` | `Not Found` (404) |
 | `aws bedrock-agentcore-control list-gateways --region $R --query "items[?name=='sra-gw']"` | `[]` |
 | `aws bedrock-agentcore-control list-policy-engines --region $R --query "policyEngines[?name=='sra_policy']"` | `[]` |
-| `aws eks list-pod-identity-associations --region $R --cluster-name $C --namespace sra --service-account agent --query associations` | `[]` (your own cluster) |
+| `aws eks list-pod-identity-associations --region $R --cluster-name $C --namespace sra --service-account agent --query associations` (and again with `--namespace bfx --service-account bifrost`) | `[]`, each time (your own cluster) |
 | `aws eks describe-cluster --region $R --name $C` | `ResourceNotFoundException` (`cluster/` path) |
 | `aws ec2 describe-vpcs --region $R --filters Name=tag:Name,Values=$C --query 'Vpcs[].VpcId'` | `[]` (`cluster/` path) |
 | `` aws ec2 describe-nat-gateways --region $R --filter "Name=tag:Name,Values=$C*" --query 'NatGateways[?State!=`deleted`].NatGatewayId' `` | `[]` (`cluster/` path) |
@@ -153,7 +156,8 @@ C=<CLUSTER_NAME>; R=us-west-2
 
 The tagging read can list a resource for hours after it was deleted, so check any ARN it
 prints with that resource's own read before you treat it as left. To remove what is left,
-run that service's delete command on the name the read used; for the EBS volume, see
+first check no ACK object still names it (ACK makes a deleted AWS object again), then run
+that service's delete command on the name the read used; for the EBS volume, see
 [`cluster/`](../cluster/README.md#what-outlives-it).
 
 **What stays.** The cluster's secrets KMS key stays pending deletion

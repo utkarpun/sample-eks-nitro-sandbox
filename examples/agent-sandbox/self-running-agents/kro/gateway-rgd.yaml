@@ -367,7 +367,7 @@ spec:
                     - ${schema.spec.prefix}-runs-${schema.spec.accountID}-${schema.spec.region}.s3.${schema.spec.region}.amazonaws.com
               ports: [ { protocol: TCP, port: 443 } ]
 
-    # The agent-config ConfigMap setup.sh:229-235 writes: mcp.json (the gateway
+    # The agent-config ConfigMap: mcp.json (the gateway
     # through mcp-proxy-for-aws) and prompt.txt.
     - id: agentConfig
       template:

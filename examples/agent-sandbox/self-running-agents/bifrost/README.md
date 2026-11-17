@@ -102,12 +102,7 @@ of gp3 storage $0.115 per GB-month (AWS Price List, prices effective 2026-11-01,
 The names are fixed to fit `bootstrap/`'s scope: the namespace `bfx` is in its
 `secret_namespaces` (ACK reads the database password there), and the AWS names
 `bfx-bifrost` and `bfx-bifrost-db` and the tag `ManagedBy=bfx` match its `rds_prefix`. To
-change them, change every site together: `rds_prefix` and `secret_namespaces` in
-`bootstrap/variables.tf`, `BIFROST_NAMESPACE` in `scripts/common.sh` (which `lib.sh`,
-`setup.sh` and `run.sh` read), `BF_PREFIX` and `BF_MANAGED_BY` in `lib.sh`, `prefix` and
-`managedBy` in `instance.yaml`, the defaults of `namespace`, `prefix` and `managedBy` in
-`rgd.yaml` and of `bifrostNamespace` in `kro/gateway-rgd.yaml`, and `BIFROST_ROLE` in
-`scripts/test.sh`.
+change them, change every `bfx` together (`git grep -n bfx` in this sample's folder).
 
 The cluster, Region, kube context and model come from the sample's `.env` (`CLUSTER_NAME`,
 `AWS_REGION`, `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`, and `AWS_PROFILE`); leave out `--context`

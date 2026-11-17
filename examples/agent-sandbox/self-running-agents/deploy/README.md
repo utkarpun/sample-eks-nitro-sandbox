@@ -4,9 +4,7 @@
 [`kro/run-rgd.yaml`](../kro/README.md#what-srarun-makes). kro makes its one child, the run's
 Job, and the Job's pod is the agent ([`agent/`](../agent/README.md)).
 
-You do not apply it by hand. `scripts/run.sh` fills every placeholder for each run (the run's
-name and id, the mode, the image, the bucket, the Region, Bifrost's namespace and the
-model), creates it, follows the pod's logs, reads the Job's verdict, then deletes the
+You do not apply it by hand. `scripts/run.sh` fills every placeholder for each run, creates it, follows the pod's logs, reads the Job's verdict, then deletes the
 `SraRun` and the pod.
 
 | Field | What it sets |

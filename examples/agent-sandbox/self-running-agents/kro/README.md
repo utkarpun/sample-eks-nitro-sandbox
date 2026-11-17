@@ -34,7 +34,7 @@ run. Bifrost has a fourth graph of its own, in [`bifrost/rgd.yaml`](../bifrost/R
 Each AWS resource that takes tags is tagged `Project=<PROJECT_TAG>` (`PROJECT_TAG` in
 `.env`, default `self-running-agents`) and `ManagedBy=sra`; the target and the Cedar policy
 take none. The names are fixed in `base.yaml` and `gateway.yaml` and match `bootstrap/`'s
-`prefix`, which scopes the ACK role to them. ACK makes each resource by its name and fails
+`prefix`, which scopes most of the ACK role to them. ACK makes each resource by its name and fails
 on a name that is taken (the graphs configure no adoption), so it never takes over another
 demo's role.
 
@@ -98,7 +98,7 @@ immutable field as an error. One instance per run.
 - **Changing a graph.** Never make a breaking schema change once the graph's CRD exists: one
   that removes or narrows what an instance may hold, such as removing a field, changing a
   type, adding a required field with no default, making a field required, or adding or
-  tightening a pattern, enum or limit ([kro's full list](https://github.com/kubernetes-sigs/kro/blob/v0.10.0/pkg/graph/crd/compat/schema.go)).
+  tightening a pattern, enum or limit ([kro's full list, at v0.10.0](https://github.com/kubernetes-sigs/kro/blob/v0.10.0/pkg/graph/crd/compat/schema.go)).
   kro refuses the change and the instance stops reconciling, deletion included. Run
   `scripts/cleanup.sh` first.
 - **A setup that never reaches ACTIVE.** `setup.sh` then prints each ACK object's state. One
@@ -106,4 +106,5 @@ immutable field as an error. One instance per run.
   then `setup.sh` again.
 - **Changing the prompt.** Edit the `prompt` field in `gateway.yaml`, which the graph puts
   in the agent's ConfigMap, then run `setup.sh`. `agent/prompt.txt` is a reference copy;
-  editing it rebuilds the image but not the prompt.
+  editing it changes the image tag, so `setup.sh` builds a new image, but the prompt stays
+  the one in `gateway.yaml`.

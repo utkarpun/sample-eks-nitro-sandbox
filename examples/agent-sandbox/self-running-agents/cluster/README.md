@@ -33,7 +33,8 @@ an access entry.
 ## Apply it
 
 Two applies, because the Kubernetes provider is configured from this cluster and cannot
-reach it before it exists. The commands are in [How to run it](../README.md#how-to-run-it).
+reach it before it exists. The commands are under "Make the cluster" in
+[How to run it](../README.md#how-to-run-it).
 If you set `cluster_name` or `region`, pass the same `-var` values on both applies and on
 the destroy, and use them in `update-kubeconfig`. Then go on to
 [`bootstrap/`](../bootstrap/README.md).

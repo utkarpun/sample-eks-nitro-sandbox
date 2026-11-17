@@ -61,6 +61,7 @@ read from `.env`).
 - **The prompt**: see [`kro/`](../kro/README.md#good-to-know).
 - **A repository to work in**: a step in `run.sh` before Claude Code starts, with the
   repository's host added to the egress rule in `kro/gateway-rgd.yaml`.
-- **Limits**: a run stops at 15 minutes (`activeDeadlineSeconds: 900` on the Job and on its
+- **Limits**: a run stops 15 minutes after its Job starts, pod scheduling and the image pull
+  included (`activeDeadlineSeconds: 900` on the Job and on its
   pod, in `kro/run-rgd.yaml`), is not retried (`backoffLimit: 0`), and the model gets at most
   8 turns (`--max-turns 8` in `run.sh`).

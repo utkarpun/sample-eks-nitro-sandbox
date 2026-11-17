@@ -28,8 +28,9 @@ and subnet groups named `bfx-*`, and security groups tagged `ManagedBy=sra` or `
 only in the cluster's VPC). ACK holds `iam:*` on `sra-*` and `bfx-*` roles with no
 permissions boundary (`WorkloadRoles`, which includes `iam:PassRole` to any service), and
 `bedrock-agentcore:*` in this Region. Whoever can create ACK kinds or
-`resourcegraphdefinitions` can make an admin role and change the gateway's policy engine.
-Keep those rights to cluster admins.
+`resourcegraphdefinitions` can make an admin role and change the gateway's policy engine,
+and kro writes Secrets and Deployments in every namespace. Keep those rights to cluster
+admins.
 
 | Variable | Default | Note |
 |---|---|---|
@@ -39,8 +40,9 @@ Keep those rights to cluster admins.
 | `rds_prefix` | `bfx` | For Bifrost; creates nothing on its own |
 | `secret_namespaces` | `["sra", "bfx"]` | |
 
-Its Terraform and provider versions are in the sample's [Versions](../README.md#versions)
-table. It reads the cluster when it plans, so the cluster must exist first.
+Its providers' pinned versions are in the sample's [Versions](../README.md#versions) table;
+it needs Terraform 1.5 or later, the AWS provider 6.73.0 or later and the Kubernetes
+provider 2.30 or later. It reads the cluster when it plans, so the cluster must exist first.
 
 ## Apply it
 

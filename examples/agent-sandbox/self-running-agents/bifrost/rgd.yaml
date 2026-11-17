@@ -15,7 +15,7 @@
 # Cluster scoped: the instance has no namespace, since it is the thing that makes
 # the namespace (as kro/base-rgd.yaml does for sra). Every namespaced child names
 # the Namespace, so kro deletes them before it. scope cannot change once the RGD
-# is live: an RGD applied before this change (namespaced) is deleted first.
+# is live.
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
 metadata:
