@@ -43,17 +43,15 @@ delete_instance() {
 step "1/5 the runs"
 BASE_GONE=0; instance_gone srabase || BASE_GONE=$?
 if [[ $BASE_GONE -eq 1 ]]; then
-  # A run is an SraRun instance; deleting it deletes its Job (kro/run-rgd.yaml).
+  # A run is an SraRun instance; deleting it deletes its Job but not the Job's
+  # pod (kro#1330), so the runs' pods go next.
   rc=0; resource_exists kc_cluster crd sraruns.kro.run || rc=$?
   case $rc in
-    0) kc delete sraruns --all --wait=true --timeout=120s || fail "the SraRun instances" ;;
+    0) kc delete sraruns --all --wait=true --timeout=120s || fail "the runs" ;;
     1) echo "  no SraRun kind on the cluster" ;;
     *) fail "could not read crd sraruns.kro.run" ;;
   esac
-  # kro makes a Job deleted alone again, so check that no run's Job is left.
-  if jobs="$(kc get jobs -l app.kubernetes.io/name=agent -o name 2>/dev/null)"; then
-    [[ -z "$jobs" ]] && echo "  no agent Job is left" || fail "agent Jobs still there: ${jobs//$'\n'/ }"
-  else fail "could not read the agent Jobs"; fi
+  kc delete pods -l app.kubernetes.io/name=agent --ignore-not-found --wait=true --timeout=120s || fail "the runs' pods"
 else echo "  no SraBase $INSTANCE, so no namespace of the sample's to clean"; fi
 
 step "2/5 the SraGateway instance"

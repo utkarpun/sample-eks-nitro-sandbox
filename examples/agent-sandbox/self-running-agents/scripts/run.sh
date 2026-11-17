@@ -8,8 +8,8 @@
 # (default example.com); it must be a host the egress rule does not name.
 #
 # Each run is its own SraRun instance (kro/run-rgd.yaml), whose one child is the
-# run's Job, created for the run and deleted after it by deleting the instance;
-# never delete the Job alone, since kro makes it again. The logs are
+# run's Job, created for the run and deleted after it by deleting the instance,
+# then its pod; never delete the Job alone, since kro makes it again. The logs are
 # streamed from the moment the pod starts, because EKS Auto Mode can remove the
 # node once the pod has finished, and the logs with it. The run's output is also
 # stored in the run bucket under runs/<run id>/ (agent/run.sh).
@@ -59,5 +59,8 @@ done
 [[ "$st" == "|" ]] && { echo "run $RUN_ID: no verdict after 60 s; srarun $JOB left in place"; exit 1; }
 echo "run $RUN_ID: job succeeded=${st%%|*} failed=${st##*|}"
 echo "run output: s3://$RUN_BUCKET/runs/$RUN_ID/"
+# Deleting the SraRun deletes the Job but not its pod (kro deletes a child with no
+# propagation policy, kro#1330), so the pod goes by its own name.
 kc delete srarun "$JOB" --wait=false >/dev/null
+kc delete pod "$pod" --ignore-not-found --wait=false >/dev/null
 [[ "${st%%|*}" == "1" ]]
