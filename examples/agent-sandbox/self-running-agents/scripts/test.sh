@@ -75,7 +75,7 @@ print(f"T2 {int(not t2)} listed={doc.get('listed', [])} get_time={t.get('text','
 print(f"NC2 {int(not nc2)} get_host_info isError={d.get('isError')} text={d.get('text','')[:200]}")
 PY
 while read -r name code rest; do verdict "$name" "$code" "$rest"; done < <(grep -E '^(T2|NC2) ' "$LOG_DIR/tools.check")
-grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run's output: $(tail -3 "$LOG_DIR/tools.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/g; s|(assumed-role/[^/]+/)[^ ]*|\1<session>|g; s|[a-z0-9-]+\.gateway\.bedrock-agentcore\.|<id>.gateway.bedrock-agentcore.|g' | tr '\n' ' ')"
+grep -qE '^T2 ' "$LOG_DIR/tools.check" || verdict T2 1 "no tool list in the run's output: $(tail -3 "$LOG_DIR/tools.log" | sed -E 's/[0-9]{12}/<ACCOUNT_ID>/g; s|(assumed-role/[^/]+/)[^ ]*|\1<session>|g; s|[a-z0-9-]+\.gateway\.bedrock-agentcore\.|<id>.gateway.bedrock-agentcore.|g; s|gateway/[a-z0-9-]+|gateway/<id>|g' | tr '\n' ' ')"
 
 # NC1: a host the egress rule does not name, read from the T run's egress gate line.
 line="$(grep -E "^sra: egress gate: ${EGRESS_CANARY:-example.com}:443 failed to connect 3 times" "$LOG_DIR/T.log")"

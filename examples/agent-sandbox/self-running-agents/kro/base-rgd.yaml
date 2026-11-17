@@ -76,8 +76,8 @@ spec:
                 value: ${schema.spec.prefix}
 
     # The image repository, scan on push. The annotation makes
-    # ACK delete it with its images, as cleanup.sh's delete-repository --force
-    # does (ecr-controller pkg/resource/repository/hook.go:21-23@v1.12.0).
+    # ACK delete it with its images when cleanup.sh deletes the SraBase instance
+    # (ecr-controller pkg/resource/repository/hook.go:21-23@v1.12.0).
     - id: repository
       template:
         apiVersion: ecr.services.k8s.aws/v1alpha1

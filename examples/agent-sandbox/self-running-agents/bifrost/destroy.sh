@@ -12,7 +12,7 @@ fail() { echo "$*" >&2; incomplete=1; }
 ns_ours=0
 rc=0; resource_exists kc_cluster namespace "$BIFROST_NAMESPACE" || rc=$?
 case $rc in
-  2) fail "could not read namespace $BIFROST_NAMESPACE, so nothing in it was removed" ;;
+  2) fail "could not read namespace $BIFROST_NAMESPACE, so nothing in it was removed"; ns_ours=2 ;;
   0)
     namespace_is_ours "$BIFROST_NAMESPACE" "$BF_MANAGED_BY" \
       || die "namespace $BIFROST_NAMESPACE is not labelled app.kubernetes.io/managed-by=$BF_MANAGED_BY, so nothing in it is touched"
@@ -32,8 +32,9 @@ crd_rc=0; resource_exists kc_cluster crd bifrostbackends.kro.run || crd_rc=$?
 case $crd_rc in
   0) rc=0; resource_exists kc_cluster bifrostbackend bifrost || rc=$?
      case $rc in
-       0) echo "deleting the graph (the RDS instance is most of the wait)"
-          kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time" ;;
+       0) if [[ $ns_ours -eq 2 ]]; then fail "the graph instance bifrost is kept, because namespace $BIFROST_NAMESPACE could not be read"
+          else echo "deleting the graph (the RDS instance is most of the wait)"
+          kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time"; fi ;;
        2) fail "could not read the graph instance bifrost, so it may be left" ;;
      esac ;;
   2) fail "could not read the CRD bifrostbackends.kro.run, so the graph instance bifrost may be left" ;;

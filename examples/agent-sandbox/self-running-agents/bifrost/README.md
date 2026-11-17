@@ -148,7 +148,8 @@ TODO: output from the fresh run
 
 `destroy.sh` uninstalls the Helm release and deletes the graph instance, so ACK deletes the
 database (no final snapshot) and the rest, and kro deletes the namespace `bfx` last. Then it
-deletes the graph and reads each piece back; it waits up to 25 minutes.
+deletes the graph and reads each piece back; it waits up to about 37 minutes, 25 of them for
+the instance delete.
 
 **If clean up is incomplete**, the lines above it say what is left, and the RDS instance may
 still bill: check `aws rds describe-db-instances --region <AWS_REGION> --db-instance-identifier bfx-bifrost`,

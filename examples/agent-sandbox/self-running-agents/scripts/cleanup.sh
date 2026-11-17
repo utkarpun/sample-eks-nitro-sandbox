@@ -52,6 +52,7 @@ if [[ $BASE_GONE -eq 1 ]]; then
     *) fail "could not read crd sraruns.kro.run" ;;
   esac
   kc delete pods -l app.kubernetes.io/name=agent --wait=true --timeout=120s || fail "the runs' pods"
+elif [[ $BASE_GONE -eq 2 ]]; then fail "could not read SraBase $INSTANCE, so the runs and their pods were not removed"
 else echo "  no SraBase $INSTANCE, so no namespace of the sample's to clean"; fi
 
 step "2/5 the SraGateway instance"
@@ -59,8 +60,9 @@ delete_instance sragateway 900; GW_OK=$?
 
 step "3/5 the run bucket's objects"
 RUN_BUCKET=""
-[[ $BASE_GONE -eq 1 ]] && RUN_BUCKET="$(instance_field srabase '{.status.bucketName}')"
-if [[ -n "$RUN_BUCKET" ]]; then
+if [[ $BASE_GONE -eq 2 ]]; then fail "could not read SraBase $INSTANCE, so the run bucket was not emptied"
+elif [[ $BASE_GONE -eq 1 ]] && ! RUN_BUCKET="$(instance_field srabase '{.status.bucketName}')"; then fail "could not read the run bucket's name from SraBase $INSTANCE"
+elif [[ -n "$RUN_BUCKET" ]]; then
   aws s3 rm "s3://$RUN_BUCKET" --recursive --only-show-errors && echo "  $RUN_BUCKET is empty" || fail "objects in $RUN_BUCKET"
 else echo "  no bucket reported by SraBase $INSTANCE"; fi
 
