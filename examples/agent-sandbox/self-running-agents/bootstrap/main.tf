@@ -186,11 +186,10 @@ resource "kubernetes_cluster_role_v1" "kro" {
     resources  = ["networkpolicies"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
-  # The example's instance kinds (kro/base-rgd.yaml SraBase, kro/gateway-rgd.yaml SraGateway,
-  # kro/run-rgd.yaml SraRun).
+  # The example's instance kinds (kro/base-rgd.yaml SraBase, kro/gateway-rgd.yaml SraGateway).
   rule {
     api_groups = ["kro.run"]
-    resources  = ["srabases", "srabases/status", "srabases/finalizers", "sragateways", "sragateways/status", "sragateways/finalizers", "sraruns", "sraruns/status", "sraruns/finalizers"]
+    resources  = ["srabases", "srabases/status", "srabases/finalizers", "sragateways", "sragateways/status", "sragateways/finalizers"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
 }
