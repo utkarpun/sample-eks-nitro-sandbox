@@ -1,8 +1,7 @@
 # scripts: set up, run, test and clean up
 
-The scripts make no AWS resource themselves. They check what the sample needs, apply the kro
-graphs, wait, upload the tool's code, push the agent image, run, check and delete. Every
-AWS object is made by ACK from the graphs in [`kro/`](../kro/README.md).
+The scripts make no AWS resource themselves: every AWS object is made by ACK from the graphs
+in [`kro/`](../kro/README.md).
 
 | Script | What it does |
 |---|---|
@@ -14,8 +13,8 @@ AWS object is made by ACK from the graphs in [`kro/`](../kro/README.md).
 
 They read `.env` (copied from `.env.example`): `CLUSTER_NAME`, `AWS_REGION`, `AWS_PROFILE`,
 `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`, `PROJECT_TAG` and `KUBECTL`. A value already set in your
-environment wins. Every kubectl call pins `--context`, so a run never depends on your
-current context.
+environment wins. When `KUBE_CONTEXT` is set, every kubectl and helm call pins it, so a run
+never depends on your current context.
 
 ## setup.sh
 
@@ -44,8 +43,7 @@ with it. Then it prints the Job's verdict and deletes the `SraRun` and the pod.
 - **A failed run.** Read the streamed output or, if the pod got past the egress gate,
   `runs/<run id>/` in the bucket: `aws s3 cp s3://<run bucket>/runs/<run id>/stream.jsonl -`.
   A pod exit of 3 means the egress gate failed and stored nothing.
-- **Limits.** A run is stopped at 15 minutes while its Job exists, is not retried, and the model gets at most 8
-  turns.
+- **Limits.** See [`agent/`](../agent/README.md#changing-it).
 - **Overwrites.** A run may overwrite earlier runs' objects. Turn on bucket versioning if
   the record matters, and then empty the bucket in the S3 console before clean up (Empty
   deletes every version), since `cleanup.sh` removes only current objects.
@@ -58,8 +56,8 @@ with it. Then it prints the Job's verdict and deletes the `SraRun` and the pod.
 
 | Check | What it shows |
 |---|---|
-| T | The agent's `get_time` call was answered, and its answer has the `time-in-utc:` form with the time the tool returned. The agent has no Bedrock permission and no `bedrock-runtime` egress, so a pass also shows its model calls went through Bifrost (T-B1). |
-| T2 | Outside the model, the gateway lists only `get_time` for the agent's role and answers it |
+| T | The agent's `get_time` call was answered, and its answer has the `time-in-utc:` form with the time the tool returned. The agent has no Bedrock permission and no `bedrock-runtime` egress, so a pass also shows its model calls went through Bifrost. |
+| T2 | Outside the model, the gateway lists only `get_time` of the `clock` target's tools for the agent's role and answers it |
 | NC1 | In T's run, the egress gate's connections to a host the rule does not name failed |
 | NC2 | A call to `get_host_info`, which the Cedar policy does not permit, is refused by the gateway |
 | NC4 | The egress gate stops a run when its canary answers: pointed at a host the rule does allow (the run bucket's), the run stops before its tool call |
@@ -69,7 +67,7 @@ with it. Then it prints the Job's verdict and deletes the `SraRun` and the pod.
 - T2 and NC2 call the gateway directly as the pod's role (`agent/mcp_call.py`), so the refusal
   is the gateway's, not the model's choice and not the bridge's. The gateway refuses
   `get_host_info` with a JSON-RPC error.
-- NC1 reads the gate line of T's own run, so it passes whenever T's run stopped at the gate;
+- NC1 reads the gate line of T's own run, so it passes whenever T's run got past the gate;
   the seven checks are six independent outcomes.
 - On EKS Auto Mode an allow learned for one pod is shared with every pod on its node, so on a
   node that also runs Bifrost NC-B1's network leg can fail while its IAM leg holds.
@@ -84,10 +82,10 @@ The raw output is kept in `tmp/self-running-agents/` at the clone's root (or `LO
 Run it after `bifrost/destroy.sh`. It deletes the `SraRun` instances and their pods, the
 `SraGateway` instance, empties the run bucket (data, which ACK does not delete), deletes the
 `SraBase` instance (the bucket, the image repository and the namespace `sra`, last), and the
-three graphs `SraRun`, `SraGateway` and `SraBase` and their CRDs; `bifrost/destroy.sh` removes
-the fourth, `BifrostBackend`. Then it reads every AWS resource back; a read it could not make
-counts as not gone. It never touches a shared install, a cluster-wide setting or the
-controllers from `bootstrap/`.
+three graphs `SraRun`, `SraGateway` and `SraBase` and their CRDs; `bifrost/destroy.sh`
+removes the fourth, `BifrostBackend`. Then it reads back each AWS resource it names; a read
+it could not make counts as not gone. It never touches a shared install, a cluster-wide
+setting or the controllers from `bootstrap/`.
 
 It is done when its last line is `clean up complete`. If it ends
 `clean up INCOMPLETE: <n> item(s) above`, the lines above name what is left: run it again.
@@ -143,6 +141,7 @@ C=<CLUSTER_NAME>; R=us-west-2
 | `aws s3api head-bucket --bucket sra-runs-<ACCOUNT_ID>-$R` | `Not Found` (404) |
 | `aws bedrock-agentcore-control list-gateways --region $R --query "items[?name=='sra-gw']"` | `[]` |
 | `aws bedrock-agentcore-control list-policy-engines --region $R --query "policyEngines[?name=='sra_policy']"` | `[]` |
+| `aws eks list-pod-identity-associations --region $R --cluster-name $C --namespace sra --service-account agent --query associations` | `[]` (your own cluster) |
 | `aws eks describe-cluster --region $R --name $C` | `ResourceNotFoundException` (`cluster/` path) |
 | `aws ec2 describe-vpcs --region $R --filters Name=tag:Name,Values=$C --query 'Vpcs[].VpcId'` | `[]` (`cluster/` path) |
 | `` aws ec2 describe-nat-gateways --region $R --filter "Name=tag:Name,Values=$C*" --query 'NatGateways[?State!=`deleted`].NatGatewayId' `` | `[]` (`cluster/` path) |
@@ -153,13 +152,14 @@ C=<CLUSTER_NAME>; R=us-west-2
 | `aws resourcegroupstaggingapi get-resources --region $R --tag-filters Key=ManagedBy,Values=sra,bfx --query 'ResourceTagMappingList[].ResourceARN'` | `[]` |
 
 The tagging read can list a resource for hours after it was deleted, so check any ARN it
-prints with that resource's own read before you treat it as left. An EBS volume EKS Auto Mode
-made belongs to no VPC, so the cluster destroy does not catch it, and it keeps billing until
-you delete it (`aws ec2 delete-volume --region $R --volume-id <id>`).
+prints with that resource's own read before you treat it as left. To remove what is left,
+run that service's delete command on the name the read used; for the EBS volume, see
+[`cluster/`](../cluster/README.md#what-outlives-it).
 
-**What stays.** The cluster's secrets KMS key stays pending deletion for 30 days. On your own
-cluster, the runtime classes and network policy enforcement stay, which this sample only
-reads, and the capabilities stay if you skipped `bootstrap/`'s destroy. On your machine: the
-agent image in Docker's local store (`docker image rm <image>`), Terraform's state in
-`bootstrap/` (and `cluster/`), and `tmp/self-running-agents/` with `test.sh`'s logs. Auto
-Mode removes the run's node on its own, once no run's pod is left.
+**What stays.** The cluster's secrets KMS key stays pending deletion
+([`cluster/`](../cluster/README.md#what-outlives-it)). On your own cluster, the runtime
+classes and network policy enforcement stay, which this sample only reads, and the
+capabilities stay if you skipped `bootstrap/`'s destroy. On your machine: the agent image in
+Docker's local store (`docker image rm <image>`), Terraform's state in `bootstrap/` (and
+`cluster/`), and `tmp/self-running-agents/` with `test.sh`'s logs. Auto Mode removes the
+run's node on its own, once no run's pod is still running.

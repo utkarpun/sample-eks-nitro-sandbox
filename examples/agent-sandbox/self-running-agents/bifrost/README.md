@@ -20,7 +20,7 @@ Service bifrost (namespace bfx, normal runtime, 1 replica)
 | File | What it is |
 |---|---|
 | `rgd.yaml`, `instance.yaml` | The `BifrostBackend` kro graph and its one instance: everything around Bifrost |
-| `values.yaml` | The values for Bifrost's official Helm chart (chart `2.1.48`, `lib.sh`) |
+| `values.yaml` | The values for Bifrost's official Helm chart |
 | `pricing/` | The model's price and parameters, which Bifrost reads locally |
 | `apply.sh`, `test.sh`, `destroy.sh` | Bring it up, prove it, take it down; `lib.sh` is shared |
 
@@ -29,10 +29,12 @@ security group and subnet group, Bifrost's IAM role and its EKS Pod Identity ass
 the ServiceAccount, a fixed in-namespace name for the database (`Service bifrost-db`), the
 pricing ConfigMap, Bifrost's network policy, and the agent's copy of its key in `sra`. The
 instance is cluster scoped, because it makes the namespace, and deleting it deletes the
-namespace last. The key copy is written with `base64.encode`, the form kro's
-[CEL libraries page](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md) gives for a Secret. The EKS kro capability's version is not
-published (`aws eks describe-capability` shows it), so whether the capability accepts that
-form is first shown when the graph goes ACTIVE in the sample's first fresh run.
+namespace last. The key copy is written with `base64.encode`, because kro puts no bytes in a
+template and its error says to encode them
+([conversions.go](https://github.com/kubernetes-sigs/kro/blob/v0.10.0/pkg/cel/conversion/conversions.go#L105):
+"encode it explicitly, e.g. base64.encode(...)"). The EKS kro capability's version is not in
+AWS's docs (read it with `aws eks describe-capability`), so whether the capability accepts
+that form is first shown when the graph goes ACTIVE in the sample's first fresh run.
 
 **The Helm chart makes** the Bifrost Deployment.
 
@@ -43,22 +45,22 @@ deterministic from their seed, so a graph cannot make fresh random bytes; a secr
 to be made outside it ([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)). It makes them once and
 never prints them; a re-run keeps them.
 
-kro and ACK are the sample's own EKS managed capabilities, from
-[`bootstrap/`](../bootstrap/README.md).
-
 ## Why the state is in Postgres
 
 A Bifrost pod may be replaced on any node, and each replacement leaves a few seconds with no
-answer. EKS Auto Mode consolidation could do it at any time, so the pod carries `karpenter.sh/do-not-disrupt` (EKS Best Practices Guide,
-`latest/bpg/autoscaling/karpenter.adoc:544-552` @edc514fac). Its configuration, the agent's
-key, the admin login and the usage counters are in Postgres, and a new pod picks them up at
-start. Postgres runs on RDS, not in the cluster, so a node change never moves the database.
+answer. EKS Auto Mode consolidation could do it at any time, so the pod carries
+`karpenter.sh/do-not-disrupt` (EKS Best Practices Guide,
+[*Karpenter*](https://docs.aws.amazon.com/eks/latest/best-practices/karpenter.html)). Its
+configuration, the agent's key, the admin login and the usage counters are in Postgres, and
+a new pod picks them up at start. Postgres runs on RDS, not in the cluster, so a node change
+never moves the database.
 
 - **One replica.** Bifrost OSS does not support several processes on one database (Bifrost
   docs, *runtime contract*: "Run one replica because live in-memory changes are not
   synchronized between OSS processes"). The EKS Best Practices Guide advises against
-  singleton pods (`latest/bpg/reliability/application.adoc:38` @edc514fac); here it cannot be
-  avoided.
+  singleton pods ([*Running highly-available
+  applications*](https://docs.aws.amazon.com/eks/latest/best-practices/application.html));
+  here it cannot be avoided.
 - **No requests or answers are kept.** The chart cannot turn Bifrost's logs store off, so
   Bifrost makes an SQLite one in `/app/data` (an `emptyDir`). `enableLogging: false` keeps the
   logging plugin, which writes requests and answers there, from loading; `test.sh` checks
@@ -77,8 +79,10 @@ start. Postgres runs on RDS, not in the cluster, so a node change never moves th
   certificate is not verified; `verify-full` would also need the RDS host name, where Bifrost
   is given the alias `bifrost-db`.
 - **Secrets as environment variables.** The chart gives the pod its Secrets as environment
-  variables, where the EKS Best Practices Guide advises volume mounts
-  (`latest/bpg/security/data.adoc:194-196` @edc514fac); the chart has no file form for them.
+  variables, where the EKS Best Practices Guide advises volume mounts ([*Data encryption and
+  secrets
+  management*](https://docs.aws.amazon.com/eks/latest/best-practices/data-encryption-and-secrets-management.html));
+  the chart has no file form for them.
 
 ## What it costs
 
@@ -94,22 +98,23 @@ of gp3 storage $0.115 per GB-month (AWS Price List, prices effective 2026-11-01,
    missing.
 2. The sample's `./scripts/setup.sh`, which makes the namespace `sra` the callers run in.
    The graph makes the agent's copy of the key there.
-3. `aws`, `kubectl`, `helm` 3, `python3` and `openssl` on your machine.
 
 The names are fixed to fit `bootstrap/`'s scope: the namespace `bfx` is in its
 `secret_namespaces` (ACK reads the database password there), and the AWS names
 `bfx-bifrost` and `bfx-bifrost-db` and the tag `ManagedBy=bfx` match its `rds_prefix`. To
 change them, change every site together: `rds_prefix` and `secret_namespaces` in
-`bootstrap/variables.tf`, `BIFROST_NAMESPACE` in `scripts/common.sh` (which `lib.sh` and
-`run.sh` read), `BF_PREFIX` and `BF_MANAGED_BY` in `lib.sh`, `prefix` and `managedBy` in
-`instance.yaml`, and `BIFROST_ROLE` in `scripts/test.sh`.
+`bootstrap/variables.tf`, `BIFROST_NAMESPACE` in `scripts/common.sh` (which `lib.sh`,
+`setup.sh` and `run.sh` read), `BF_PREFIX` and `BF_MANAGED_BY` in `lib.sh`, `prefix` and
+`managedBy` in `instance.yaml`, the defaults of `namespace`, `prefix` and `managedBy` in
+`rgd.yaml` and of `bifrostNamespace` in `kro/gateway-rgd.yaml`, and `BIFROST_ROLE` in
+`scripts/test.sh`.
 
 The cluster, Region, kube context and model come from the sample's `.env` (`CLUSTER_NAME`,
 `AWS_REGION`, `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`, and `AWS_PROFILE`); leave out `--context`
 in the commands below when `KUBE_CONTEXT` is empty. `apply.sh` writes the Region and model
-into the instance (the role's policy and the egress rule) and into `values.yaml` (Bifrost's
-provider key and the key's allowed model). A different model also needs its entries in
-`pricing/`.
+into the instance (the role's policy and the egress rule) and into a rendered copy of
+`values.yaml` (Bifrost's provider key and the key's allowed model). A different model also
+needs its entries in `pricing/`.
 
 **Pricing files.** `pricing/pricing.json` and `pricing/model-parameters.json` hold the one
 entry each that Bifrost reads for this model (`bedrock/us.anthropic.claude-sonnet-5-5` and
@@ -132,16 +137,6 @@ The output blocks on this page will come from one fresh run of `apply.sh`, `test
 TODO: output from the fresh run
 ```
 
-**On a cluster that ran the earlier, namespaced Bifrost graph**, `apply.sh` fails at the
-graph: kro cannot change a graph's `scope` once it is applied. Delete the old instance,
-graph and instance kind first, in this order, then run `apply.sh`:
-
-```bash
-kubectl --context <KUBE_CONTEXT> -n bfx delete bifrostbackend bifrost --wait --timeout=1500s
-kubectl --context <KUBE_CONTEXT> delete rgd bifrost-backend
-kubectl --context <KUBE_CONTEXT> delete crd bifrostbackends.kro.run
-```
-
 ## Prove it
 
 ```bash
@@ -156,7 +151,7 @@ TODO: output from the fresh run
 |---|---|---|
 | BQ-3 | Bifrost becomes Ready with its ApplicationNetworkPolicy present | |
 | CALLER | a pod with Bifrost's ServiceAccount is `bfx-bifrost` | a pod with another ServiceAccount gets no role |
-| IAM | the profile, and a model called through it | the model called directly |
+| IAM (simulated) | the profile, and a model called through it | the model called directly |
 | NC-B2 | the agent's key gets past auth | no key, a wrong key (401); the agent's key on a model outside its list (403) |
 | T-B0 | one model call with the agent's key | |
 | COST | Bifrost priced that call (`bifrost_cost_total`) | |
@@ -173,11 +168,9 @@ A caller sets `ANTHROPIC_BASE_URL=http://bifrost.bfx.svc.cluster.local:8080/anth
 names the model `bedrock/<model id>`, and reads its key from the Secret `bifrost-agent-key`.
 The agent does this in `kro/run-rgd.yaml` and `agent/settings.json`.
 
-**Network policy.** This fork ships Bifrost's network policy (and the agent's), though the
-upstream repository's rules say a new sample ships none: it is what keeps Bifrost reachable
-from agent pods only, with default deny and named allows (EKS Best Practices Guide,
-`latest/bpg/security/network.adoc:71-76` @edc514fac). Drop it if the sample is proposed
-upstream.
+**Network policy.** Bifrost's network policy lets only agent pods reach it, with default
+deny and named allows (EKS Best Practices Guide, [*Network
+security*](https://docs.aws.amazon.com/eks/latest/best-practices/network-security.html)).
 
 ## Stop it
 

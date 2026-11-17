@@ -5,11 +5,11 @@ EKS Auto Mode cluster with Nitro sandboxes and network policy enforcement on.
 
 ## What it makes
 
-- **A VPC** (`terraform-aws-modules/vpc/aws` 6.7.3) named after the cluster, with three
+- **A VPC** (`terraform-aws-modules/vpc/aws`) named after the cluster, with three
   private and three public subnets in the first three Availability Zones, and one NAT
   gateway per zone, as the EKS Best Practices Guide advises for a zone-independent design.
   That bills three NAT gateways and three Elastic IPs.
-- **An EKS Auto Mode cluster** (`terraform-aws-modules/eks/aws` 21.29.0) with the
+- **An EKS Auto Mode cluster** (`terraform-aws-modules/eks/aws`) with the
   `general-purpose` and `system` node pools. The module keeps its defaults: a KMS key for
   secrets (30-day deletion window), and the audit, api and authenticator logs in CloudWatch
   for 90 days. Pods get AWS credentials through EKS Pod Identity, so there is no IRSA OIDC
@@ -33,29 +33,17 @@ an access entry.
 ## Apply it
 
 Two applies, because the Kubernetes provider is configured from this cluster and cannot
-reach it before it exists:
-
-```bash
-terraform init
-terraform apply -target=module.vpc -target=module.eks -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
-terraform apply -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
-aws eks update-kubeconfig --name sandbox-demo --region us-west-2
-```
-
-Use your own `cluster_name` and `region` in the last line if you set them. Then go on to
+reach it before it exists. The commands are in [How to run it](../README.md#how-to-run-it).
+If you set `cluster_name` or `region`, pass the same `-var` values on both applies and on
+the destroy, and use them in `update-kubeconfig`. Then go on to
 [`bootstrap/`](../bootstrap/README.md).
 
 ## Destroy it
 
 Last, after the sample's clean up and `bootstrap/`'s destroy. One `terraform destroy`
 removes the ConfigMap, then the cluster, its IAM roles and log group, and the VPC with its
-NAT gateways:
-
-```bash
-terraform destroy -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
-```
-
-Done when it ends `Destroy complete!`.
+NAT gateways (step 4 of the clean up in [How to run it](../README.md#how-to-run-it)). Done
+when it ends `Destroy complete!`.
 
 ### If the destroy stops on the VPC
 

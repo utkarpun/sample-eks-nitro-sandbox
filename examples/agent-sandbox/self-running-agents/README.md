@@ -12,8 +12,13 @@ AgentCore Gateway, which asks a Cedar policy about every call. Its model calls g
 [Bifrost](bifrost/README.md), a model gateway in the cluster, so the agent's own IAM role
 has no Bedrock permission.
 
+It deploys a VPC and an EKS Auto Mode cluster (or uses yours), kro and ACK, an AgentCore
+Gateway with a Cedar policy and a Lambda tool, an S3 run bucket and an ECR repository, and
+Bifrost with its RDS PostgreSQL database.
+
 Everything is code: Terraform for the cluster and the controllers, kro graphs for the
-sample's own resources, and Helm for Bifrost's chart.
+sample's own resources, and Helm for Bifrost's chart. Scripts apply them, upload the tool's
+code, push the image and make Bifrost's four Secrets.
 
 ```bash
 git clone -b self-running-agents-kro https://github.com/utkarpun/sample-eks-nitro-sandbox.git
@@ -24,18 +29,20 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 
 - **A cluster.** An EKS Auto Mode cluster with Nitro sandboxes and network policy
   enforcement on. Make one with Terraform in [`cluster/`](cluster/README.md), or use an
-  Auto Mode cluster you already have. `setup.sh` checks for the sandbox runtime class and
-  for enforcement, stops if either is missing, and prints how to turn enforcement on.
+  Auto Mode cluster you already have. `setup.sh` checks both.
 - **Tools.** Terraform 1.5.7 or later; Docker with `linux/amd64` builds; the AWS CLI v2
-  2.32.8 or later; `kubectl` within one minor version of the cluster; `helm` 3, `python3`,
-  `openssl` and `sha256sum`.
-- **AWS access.** Credentials that can run [`bootstrap/`](bootstrap/README.md) (an IAM role,
-  EKS capabilities, an access policy association, and a ClusterRole on the cluster) and the
-  scripts (read the cluster, push to the sample's ECR repository, write its run bucket,
-  apply kro graphs, and simulate IAM roles for `test.sh`). Every other AWS resource is made
-  by the ACK capability's role.
+  2.32.8 or later (the first with the AgentCore Policy commands `cleanup.sh` reads back
+  with, [changelog](https://github.com/aws/aws-cli/blob/v2/CHANGELOG.rst#2328)); `kubectl`
+  within one minor version of the cluster; `helm` 3, `python3`, `openssl` and `sha256sum`.
+- **AWS access.** Credentials that can run [`cluster/`](cluster/README.md) if you use it (a
+  VPC, an EKS cluster, its IAM roles, KMS key and log group),
+  [`bootstrap/`](bootstrap/README.md) (an IAM role, EKS capabilities, an access policy
+  association, and a ClusterRole on the cluster) and the scripts (read the cluster, push to
+  the sample's ECR repository, write and empty its run bucket, apply kro graphs, and
+  simulate IAM roles for `test.sh`). Every other AWS resource is made by the ACK
+  capability's role.
 - **Bedrock and AgentCore.** Access to the Bedrock model in `.env`, and AgentCore Gateway
-  and AgentCore Policy in your Region (this run used `us-west-2`).
+  and AgentCore Policy in your Region (written for `us-west-2`).
 
 **What it costs.** Beyond the cluster: the Bedrock tokens the agent spends, the gateway's
 tool calls, one Lambda call per tool call, and the node EKS Auto Mode starts for the
@@ -111,26 +118,21 @@ A run goes like this:
 4. The model calls `clock___get_time`. The gateway asks the policy engine, the policy
    permits it, and the gateway invokes the Lambda function.
 5. The pod copies the run's output to the run bucket and exits. `run.sh` deletes the
-   `SraRun`, which deletes the Job; kro leaves the Job's pod
-   ([kro#1330](https://github.com/kubernetes-sigs/kro/issues/1330)), so `run.sh` then
-   deletes the pod.
+   `SraRun`, then the pod.
 
-Never delete a run's Job by hand: delete its `SraRun`, then its pod. kro makes a deleted
-Job again, which starts a second run.
+Never delete a run's Job by hand: delete its `SraRun`, then its pod
+([why](kro/README.md#what-srarun-makes)).
 
 ## How to run it
 
-The output on this page comes from one fresh run on a cluster that had none of the
+The output on this page will come from one fresh run on a cluster that had none of the
 sample's resources. The account id is replaced with `<ACCOUNT_ID>`, the cluster name with
 `<CLUSTER_NAME>`, and the generated ids of the gateway, the policy engine and the Pod
 Identity association with `<id>`; long blocks are abridged where marked. The `sra:`
-prefix on the pod's own lines is fixed in `agent/run.sh`. The kro form of the run
-(`SraRun`) and of Bifrost's graph has not yet run on a cluster; the TODO blocks fill from
-its first fresh run.
+prefix on the pod's own lines is fixed in `agent/run.sh`.
 
-**Make the cluster** (skip this on your own cluster). Two applies, because the Kubernetes
-provider needs the cluster to exist first. Give your own address for the API endpoint.
-Details: [`cluster/`](cluster/README.md).
+**Make the cluster** (skip this on your own cluster). Give your own address for the API
+endpoint. Details, and why two applies: [`cluster/`](cluster/README.md).
 
 ```bash
 cd cluster
@@ -145,8 +147,8 @@ cd ..
 TODO: output from the fresh run
 ```
 
-**Step 0: turn on kro and ACK.** Once per cluster. After a pull, run Step 0 and then
-Step 2 again. On the `cluster/` path `<CLUSTER_NAME>` is `sandbox-demo`, unless you set
+**Step 0: turn on kro and ACK.** Once per cluster. After a pull, run Step 0, Step 2 and
+Step 2b again. On the `cluster/` path `<CLUSTER_NAME>` is `sandbox-demo`, unless you set
 `cluster_name`. Details: [`bootstrap/`](bootstrap/README.md).
 
 ```bash
@@ -175,8 +177,8 @@ credentials. After `aws eks update-kubeconfig`, the context is the cluster's ARN
 not your CLI's default.
 
 **Step 2: set everything up.** `setup.sh` checks the cluster, applies the three graphs,
-uploads the tool's code, pushes the agent image and waits until the gateway is `ACTIVE`.
-If it stops part way, run it again. Details: [`scripts/`](scripts/README.md).
+uploads the tool's code, pushes the agent image and waits until the `SraGateway` instance is
+`ACTIVE`. If it stops part way, run it again. Details: [`scripts/`](scripts/README.md).
 
 ```bash
 ./scripts/setup.sh
@@ -187,8 +189,8 @@ TODO: output from the fresh run
 ```
 
 **Step 2b: set up Bifrost.** It needs the namespace `sra` that `setup.sh` made. Its graph
-copies the agent's key into `sra`, and `run.sh` and `test.sh` stop until that key is there.
-Details: [`bifrost/`](bifrost/README.md).
+copies the agent's key into `sra`, and `run.sh` and `test.sh` refuse to start without that
+key. Details: [`bifrost/`](bifrost/README.md).
 
 ```bash
 ./bifrost/apply.sh
@@ -223,24 +225,11 @@ each refusal. What each check proves: [`scripts/`](scripts/README.md#what-testsh
 TODO: output from the fresh run
 ```
 
-The tool function's own log shows that only `get_time` reached it (2 from `test.sh`, 3 if
-you ran Step 3 first):
+The tool function's own log shows that only `get_time` reached it (at least 3 from
+`test.sh`; one more if you ran Step 3 first):
 
 ```text
 TODO: output from the fresh run
-```
-
-<a id="step-5"></a>
-**Step 5: the window the egress gate is for.** This block is from a separate, earlier run,
-made before the `SraRun` graph, of the same pod spec (then a bare Job), with the gate replaced by a loop that requests
-`example.com` every few seconds from the moment the pod starts:
-
-```text
-0.1 answered 200
-8.1 refused URLError
-16.1 refused URLError
-...
-120.5 refused URLError
 ```
 
 **Clean up.** In this order, from this folder of the clone that ran the setup, with the
@@ -256,10 +245,11 @@ of reads that prove everything is gone is in
      --query 'cluster.encryptionConfig[0].provider.keyArn' --output text
    ```
 
-2. Remove Bifrost, then the sample. Each script is done when its last line is
-   `clean up complete`; if not, the lines above say what is left, so run it again. A
-   database left behind keeps billing, and its security group blocks the VPC delete. Run
-   both before step 3: with kro or ACK gone they cannot finish (see
+2. Remove Bifrost, then the sample. Each script is done when its last line is `clean up
+   complete`; if not, the lines above say what is left, so run it again. A database left
+   behind keeps billing, and its security group blocks the VPC delete. If you turned on
+   bucket versioning, empty the bucket in the S3 console first: `cleanup.sh` removes only
+   current objects. Run both before step 3: with kro or ACK gone they cannot finish (see
    [`scripts/`](scripts/README.md#if-kro-or-ack-is-already-gone)).
 
    ```bash
@@ -282,7 +272,8 @@ of reads that prove everything is gone is in
    aws eks list-capabilities --cluster-name <CLUSTER_NAME> --region us-west-2
    ```
 
-   Done when the destroy ends `Destroy complete!` and the list shows `"capabilities": []`.
+   Done when the destroy ends `Destroy complete!` and the list no longer shows `sra-ack` or
+   `sra-kro`.
 
    ```text
    TODO: output from the fresh run
@@ -305,29 +296,26 @@ of reads that prove everything is gone is in
 
 ## Design
 
-**Terraform for the base, Helm for other people's charts, kro for ours.** The cluster and
-the controllers are Terraform ([`cluster/`](cluster/README.md),
-[`bootstrap/`](bootstrap/README.md)). Bifrost comes from its official Helm chart. Every
-resource that is ours, in AWS and in the cluster, is a kro graph whose AWS objects the AWS
-Controllers for Kubernetes (ACK) make. Both controllers are EKS managed capabilities. The
-scripts only apply graphs, wait, upload the tool's code, push the image, run, check and
-delete. The one exception is Bifrost's four Secrets, which `bifrost/apply.sh` makes: kro's
-generators (`random.seededString`, `random.seededInt`) are deterministic from their seed, so
-a graph cannot make fresh random bytes; a secret value has to be made outside it
-([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
+**Terraform for the base, Helm for other people's charts, kro for ours.** Every resource
+that is ours, in AWS and in the cluster, is a kro graph whose AWS objects the AWS
+Controllers for Kubernetes (ACK) make; both controllers are EKS managed capabilities. The
+one exception is Bifrost's four Secrets, which `bifrost/apply.sh` makes
+([why](bifrost/README.md#what-is-in-this-folder)).
 
 **One narrow role per piece.** The agent pod's ServiceAccount maps to one IAM role through
 EKS Pod Identity. That role may call `bedrock-agentcore:InvokeGateway` on the one gateway
 and put objects under `runs/` in the run bucket, nothing else. The model calls go through
 Bifrost, whose own role holds the Bedrock permission. This follows the EKS Best Practices
-Guide's "Use one IAM role per application" (`latest/bpg/security/iam.adoc:1078-1084` at
-`aws/aws-eks-best-practices` `edc514fac86518b50129401c0cffd1f7981d7ec5`).
+Guide's "Use one IAM role per application" ([*Identity and Access
+Management*](https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html)).
 
 **Every tool call is decided outside the sandbox.** The gateway knows the caller by its
 SigV4 signature and asks a Cedar policy, which permits only `clock___get_time` for the
-agent's role. Cedar denies by default. Inside the pod, Claude Code's built-in tools are off
-(`--tools ""`) and `agent/settings.json` allows only the gateway. More:
-[`kro/AGENTCORE.md`](kro/AGENTCORE.md).
+agent's role. Cedar denies by default. Whoever can change the gateway
+(`bedrock-agentcore:UpdateGateway`, which the ACK role holds, or an edit of the gateway
+graph) can switch the policy engine to `LOG_ONLY` or remove it. Inside the pod, Claude
+Code's built-in tools are off (`--tools ""`) and `agent/settings.json` allows only the
+gateway. More: [`kro/AGENTCORE.md`](kro/AGENTCORE.md).
 
 **No Kubernetes API token, sandbox only.** The pod turns off token automount, and an
 admission policy refuses any pod in the namespace that leaves it on or does not run in
@@ -337,9 +325,8 @@ admission policy refuses any pod in the namespace that leaves it on or does not 
 Bifrost, and two names on 443: the gateway and the run bucket. The agent waits for that rule
 before it starts (the egress gate, [`agent/`](agent/README.md)).
 
-**State outside the pod.** The pod's filesystem is read-only apart from three `emptyDir`
-volumes. Its output is streamed by `run.sh` and copied to `s3://<run bucket>/runs/<run id>/`
-before the pod exits.
+**State outside the pod.** The pod keeps nothing; its output goes to the run bucket
+([`agent/`](agent/README.md#what-a-run-does)).
 
 **A plain Job, not a SandboxTemplate.** No controller adds a network policy of its own, so
 the egress rule is the only one. The price is cold start.
@@ -353,26 +340,28 @@ anyone else create pods in the namespace.
   that shares an address with an allowed name is reachable too (Amazon EKS User Guide,
   [*Use Network Policies with EKS Auto Mode*](https://docs.aws.amazon.com/eks/latest/userguide/auto-net-pol.html)).
   On this cluster the learned addresses were shared by every pod on the node. Every S3
-  bucket in the Region shares the run bucket's addresses, and public buckets need no role.
+  bucket in the Region shares the run bucket's addresses, and a public bucket can be read
+  and written with no role.
 - **DNS is open.** Port 53 is allowed to any address, and every name still resolved from an
-  agent pod, so treat DNS as a channel out. The EKS Best Practices Guide's example allows DNS
-  only to `kube-dns` (`latest/bpg/security/network.adoc:100-129`, same commit).
+  agent pod, so treat DNS as a channel out. The EKS Best Practices Guide's example allows
+  DNS only to `kube-dns` ([*Network
+  security*](https://docs.aws.amazon.com/eks/latest/best-practices/network-security.html)).
 - **The window before the policy.** The egress gate keeps the agent from starting during it
   when the canary is reachable, but the window exists for every pod in the namespace. The
-  NodeClass's `networkPolicy: DefaultDeny` closes it for every node (Amazon EKS User Guide,
+  NodeClass's `networkPolicy: DefaultDeny` closes it for every node of the NodePools that
+  use that NodeClass (Amazon EKS User Guide,
   [*Create a Node Class for Amazon EKS*](https://docs.aws.amazon.com/eks/latest/userguide/create-node-class.html)).
   Not exercised by this sample.
-- **The model call.** The agent's key is limited to one model and a request and token rate,
-  with no spend budget ([Stop it](bifrost/README.md#stop-it)). Nothing inspects prompts or
-  tool results. Bedrock records the calls as Bifrost's role: CloudTrail logs each
-  `InvokeModel`, CloudWatch counts invocations and tokens per model (`AWS/Bedrock`), and
-  model invocation logging, if you turn it on, keeps the bodies.
+- **The model call.** The agent's key travels to Bifrost over plain HTTP inside the cluster.
+  It is limited to one model and a request and token rate, with no spend budget ([Stop
+  it](bifrost/README.md#stop-it)). Nothing inspects prompts or tool results. Bedrock records
+  the calls as Bifrost's role: CloudTrail logs each `InvokeModel`, CloudWatch counts
+  invocations and tokens per model (`AWS/Bedrock`), and model invocation logging, if you
+  turn it on, keeps the bodies.
 - **No in-guest policy.** An isolated sandbox runs no in-guest policy unless one is supplied
   (Amazon EKS User Guide,
   [*Sandboxing on Amazon EKS with isolated and confidential pods*](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing.html)),
-  and this sample supplies none. Our earlier test of in-guest Cedar and of image signing
-  (AWS Signer) covered confidential mode only. The Cedar policy here is the gateway's, in
-  AWS.
+  and this sample supplies none. The Cedar policy here is the gateway's, in AWS.
 - **Admission checks two fields.** It does not refuse a privileged container, a `hostPath`
   volume, `hostNetwork`, a Secret in `env` or a token mounted on purpose as a projected
   volume, and an isolated sandbox does not refuse the first two either; a `hostNetwork` pod
@@ -386,9 +375,14 @@ anyone else create pods in the namespace.
   `sraruns` to yourself too, and `create` on `bifrostbackends` to cluster admins: an
   instance can make, label and later delete the namespace it names and write the agent's
   key into the namespace `agentNamespace` names.
-- **Whoever can create ACK objects holds the ACK role.** That role may manage any IAM role
-  named `sra-*` and pass it to Lambda, AgentCore and Pod Identity. Keep the ACK kinds to
-  cluster admins ([`bootstrap/`](bootstrap/README.md)).
+- **Whoever can create ACK objects holds the ACK role.** ACK holds `iam:*` on `sra-*` and
+  `bfx-*` roles with no permissions boundary, and `bedrock-agentcore:*` in this Region.
+  Whoever can create ACK kinds or `resourcegraphdefinitions` can make an admin role and change
+  the gateway's policy engine. Keep those rights to cluster admins
+  ([`bootstrap/`](bootstrap/README.md)).
+- **The policy engine's mode.** Nothing stops a change of the gateway to `LOG_ONLY`; keep
+  edits of `gateway-rgd.yaml` and the ACK `Gateway` kind to cluster admins
+  ([`kro/AGENTCORE.md`](kro/AGENTCORE.md#things-to-know)).
 - **Instance metadata.** An isolated sandbox runs its own IMDSv2 service at
   `169.254.169.254`, inside the sandbox, so the egress rule does not reach it. It serves only
   the Region, Availability Zone, Availability Zone ID, services domain and partition, and 404
@@ -402,7 +396,7 @@ anyone else create pods in the namespace.
   interface VPC endpoints (the gateway's is
   `com.amazonaws.<Region>.bedrock-agentcore.gateway`); this sample uses the public ones.
 
-**Extending it.** Three seams: your own prompt (the `prompt` field in `kro/gateway.yaml`), a
+**Extending it.** Three seams: your own prompt ([`kro/`](kro/README.md#good-to-know)), a
 repository checkout for the agent (a step in `agent/run.sh` before Claude Code starts, with
 the repository's host added to the egress rule), and more tools as extra `GatewayTarget`
 resources, each with its own Cedar `Policy`. Read the list above before you give the agent a
@@ -419,6 +413,6 @@ tool that runs code or opens a connection.
 | Terraform providers | `hashicorp/aws` 6.73.0, `hashicorp/kubernetes` 3.5.0 (`bootstrap/` and `cluster/` lock files) |
 | Terraform modules (`cluster/`) | `terraform-aws-modules/vpc/aws` 6.7.3, `terraform-aws-modules/eks/aws` 21.29.0 |
 | Bifrost Helm chart | `2.1.48` (`bifrost/lib.sh`) |
-| kro and ACK capabilities | EKS managed; this run: `TODO: output from the fresh run` (`terraform output kro_version ack_version`) |
+| kro and ACK capabilities | EKS managed; this run: `TODO: output from the fresh run` (`terraform output kro_version && terraform output ack_version`) |
 | EKS | Auto Mode; this run: `TODO: output from the fresh run` |
 | AWS CLI | `TODO: output from the fresh run` for this run |

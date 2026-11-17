@@ -4,7 +4,7 @@
 [`kro/run-rgd.yaml`](../kro/README.md#what-srarun-makes). kro makes its one child, the run's
 Job, and the Job's pod is the agent ([`agent/`](../agent/README.md)).
 
-You do not apply it by hand. `scripts/run.sh` fills its placeholders for each run (the run's
+You do not apply it by hand. `scripts/run.sh` fills every placeholder for each run (the run's
 name and id, the mode, the image, the bucket, the Region, Bifrost's namespace and the
 model), creates it, follows the pod's logs, reads the Job's verdict, then deletes the
 `SraRun` and the pod.
@@ -19,10 +19,9 @@ model), creates it, follows the pod's logs, reads the Job's verdict, then delete
 | `runBucket`, `region` | Where the output goes |
 | `bifrostNamespace`, `modelID` | Where the model calls go, and which model |
 
-**Deleting a run.** Delete its `SraRun`, never its Job: kro makes a deleted Job again, which
-starts a second run. The `SraRun` delete leaves the pod
-([kro#1330](https://github.com/kubernetes-sigs/kro/issues/1330)), so delete the pod after:
-once its Job is gone the pod has no 15-minute deadline and holds its node.
+**Deleting a run.** Delete its `SraRun`, then its pod
+([why](../kro/README.md#what-srarun-makes)). A pod left behind keeps its own 15-minute
+deadline ([limits](../agent/README.md#changing-it)), then stops and frees its node.
 
 ```bash
 kubectl -n sra delete srarun <name>

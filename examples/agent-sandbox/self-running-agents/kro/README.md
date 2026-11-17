@@ -11,11 +11,9 @@ imply. ACK makes the AWS ones. Both controllers come from [`bootstrap/`](../boot
 | `SraGateway` (`gateway-rgd.yaml`) | `gateway.yaml`, one per cluster | The AgentCore Gateway and its Cedar policy ([AGENTCORE.md](AGENTCORE.md)), the tool function, the agent's role and Pod Identity, the admission policy, the egress rule and the agent's ConfigMap |
 | `SraRun` (`run-rgd.yaml`) | [`deploy/run.yaml`](../deploy/README.md), one per run | The run's Job |
 
-`scripts/setup.sh` applies the three graphs, then the `SraBase` instance, then uploads the
-tool's code to the bucket and pushes the image, then applies the `SraGateway` instance:
-ACK's Lambda function reads its code from S3 when it is created. `run.sh` makes one
-`SraRun` per run. Bifrost has a fourth graph of its own, in
-[`bifrost/rgd.yaml`](../bifrost/README.md).
+`scripts/setup.sh` applies `SraGateway` only after it uploads the tool's code, because ACK's
+Lambda function reads its code from S3 when it is created. `run.sh` makes one `SraRun` per
+run. Bifrost has a fourth graph of its own, in [`bifrost/rgd.yaml`](../bifrost/README.md).
 
 ## What SraGateway makes
 
@@ -45,12 +43,13 @@ demo's role.
 **Identity.** `sra-agent` may call `bedrock-agentcore:InvokeGateway` on the one gateway and
 `s3:PutObject` under `runs/` in the run bucket. It has no Bedrock statement. It trusts only
 Pod Identity sessions tagged with this cluster, this namespace and the `agent`
-ServiceAccount (EKS Best Practices Guide, `latest/bpg/security/iam.adoc:940-947` at
-`aws/aws-eks-best-practices` `edc514fac86518b50129401c0cffd1f7981d7ec5`).
+ServiceAccount (EKS Best Practices Guide,
+[*Identity and Access Management*](https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html)).
 
 **No Kubernetes API token.** The ServiceAccount and the pod set
-`automountServiceAccountToken: false` (`iam.adoc:1104-1108`, same commit). The only token in
-the pod is the one EKS Pod Identity projects for its node agent
+`automountServiceAccountToken: false` (same page), so code in the pod holds no credential
+for the Kubernetes API. The only token in the pod is the one EKS Pod Identity projects for
+its node agent
 (`/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token`, audience
 `pods.eks.amazonaws.com`), which the Pod Identity Agent exchanges for the role's
 credentials; the Kubernetes API should refuse it, since its audience is not the API's
@@ -65,10 +64,10 @@ rules, or a policy engine, before anyone but you creates pods in the namespace.
 isolates them, and allows DNS (port 53 to any address), the Pod Identity agent at
 `169.254.170.23:80`, Bifrost's pods in `bfx` on TCP 8080, and TCP 443 to two names: the
 gateway's host and the run bucket's host. The EKS Best Practices Guide starts from a
-deny-all policy for every pod in the namespace (`latest/bpg/security/network.adoc:71-90`,
-same commit); this rule applies that deny to the agent pods only. The run is a plain Job,
-not an agent-sandbox `SandboxTemplate`, so no controller adds a policy of its own. On a
-template, the controller's default policy would open what this rule closes: set
+deny-all policy for every pod in the namespace ([*Network
+security*](https://docs.aws.amazon.com/eks/latest/best-practices/network-security.html));
+this rule applies that deny to the agent pods only. On an agent-sandbox `SandboxTemplate`,
+the controller's default policy would open what this rule closes: set
 `networkPolicyManagement: Unmanaged` or carry these rules in the template's own
 `networkPolicy`.
 
@@ -76,8 +75,7 @@ template, the controller's default policy would open what this rule closes: set
 
 One Job in `sra`, the run's only child: Claude Code in the image from the `SraBase`
 repository, with `runtimeClassName: isolated-sandbox`, a read-only root filesystem, 1 vCPU
-and 2Gi, no retry (`backoffLimit: 0`), a 15-minute limit while the Job exists
-(`activeDeadlineSeconds: 900`) and
+and 2Gi, the run limits in [`agent/`](../agent/README.md#changing-it), and
 `karpenter.sh/do-not-disrupt`, because Auto Mode consolidation otherwise evicts a sandbox pod
 mid-run. Its model calls go to Bifrost (`ANTHROPIC_BASE_URL`) with the Secret
 `bifrost-agent-key`, which Bifrost's graph makes in `sra`.
@@ -95,13 +93,18 @@ immutable field as an error. One instance per run.
 ## Good to know
 
 - **Order.** kro orders each graph by its references; the order of `SraGateway` is in the
-  comment at the top of `gateway-rgd.yaml`. kro deletes in reverse, the namespace last.
-- **Changing a graph.** Never make a breaking schema change (remove a field, add a required
-  field without a default, change a type) while its instance exists: kro refuses the change
-  and the instance stops reconciling, deletion included. Run `scripts/cleanup.sh` first.
+  comment at the top of `gateway-rgd.yaml`. kro deletes in reverse; `SraBase` deletes the
+  namespace last.
+- **Changing a graph.** Never make a breaking schema change once the graph's CRD exists: one
+  that removes or narrows what an instance may hold, such as removing a field, changing a
+  type, adding a required field with no default, making a field required, or adding or
+  tightening a pattern, enum or limit ([kro's full list](https://github.com/kubernetes-sigs/kro/blob/v0.10.0/pkg/graph/crd/compat/schema.go)).
+  kro refuses the change and the instance stops reconciling, deletion included. Run
+  `scripts/cleanup.sh` first.
 - **A setup that never reaches ACTIVE.** `setup.sh` then prints each ACK object's state. A
   gateway made a moment after its role can fail IAM propagation, and ACK does not retry an
   `ACK.Terminal` error. The graph makes the gateway role first to avoid it, which is a timing
   fix, not a guarantee. Run `cleanup.sh`, then `setup.sh` again.
-- **Changing the prompt.** Edit the `prompt` field in `gateway.yaml` (the text of
-  `agent/prompt.txt`), then run `setup.sh`.
+- **Changing the prompt.** Edit the `prompt` field in `gateway.yaml`, which the graph puts
+  in the agent's ConfigMap, then run `setup.sh`. `agent/prompt.txt` is a reference copy;
+  editing it rebuilds the image but not the prompt.

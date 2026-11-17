@@ -21,7 +21,7 @@ through (`test.sh` reads it).
 
 `setup.sh` zips `handler.py`, uploads it to the run bucket as `tool/clock-<hash>.zip`, then
 applies the `SraGateway` instance, whose `tool` resource makes the function from that zip:
-runtime `python3.13`, handler `handler.handler`, 10 s timeout, 128 MB. Its role is `sra-tool`
+handler `handler.handler`, 10 s timeout, 128 MB. Its role is `sra-tool`
 and its log group `/aws/lambda/sra-clock` keeps one day.
 
 To change the tool, edit `handler.py` and run `setup.sh`: a new zip has a new key and hash,

@@ -57,8 +57,8 @@ it directly, as `agent/mcp_call.py` does (`test.sh` checks T2 and NC2).
 - The agent's role `sra-agent` may call `bedrock-agentcore:InvokeGateway` on this gateway
   only. It has no `bedrock-agentcore:UpdateGateway` permission.
 - The bridge, `mcp-proxy-for-aws-cli`, runs inside the pod as a stdio MCP server and signs
-  each request. The run's ConfigMap `agent-config` carries its `mcp.json`, with the
-  gateway's URL from the gateway's status.
+  each request. The ConfigMap `agent-config`, which `SraGateway` makes and every run mounts,
+  carries its `mcp.json`, with the gateway's URL from the gateway's status.
 - The egress rule lets the pod reach the gateway's host on 443.
 
 ## Things to know
@@ -69,7 +69,7 @@ it directly, as `agent/mcp_call.py` does (`test.sh` checks T2 and NC2).
 - **The gateway role is scoped by name, not exact ARN.** The role is made before the
   gateway, and kro cannot make the role and the gateway depend on each other. Making it
   first also avoids an IAM propagation failure that ACK would not retry. Its trust lets any
-  AgentCore gateway in the account assume it (`gateway/*`).
+  AgentCore gateway in this account and Region assume it (`gateway/*`).
 - **Where a refusal is recorded.** The gateway's own logs do not carry policy decisions. The
   `DenyDecisions` metric in `AWS/Bedrock-AgentCore` does, by default:
   `aws cloudwatch get-metric-statistics --namespace AWS/Bedrock-AgentCore --metric-name DenyDecisions ...`.
