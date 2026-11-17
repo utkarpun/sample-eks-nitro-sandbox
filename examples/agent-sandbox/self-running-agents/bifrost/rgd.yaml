@@ -282,8 +282,9 @@ spec:
 
     # The same key in the agent's namespace, for the agent to read
     # (kro/run-rgd.yaml mounts it). kro reads a Secret's data as bytes and does not
-    # put bytes in a template, so the copy encodes them back to base64, the form
-    # kro's CEL libraries page gives for a Secret.
+    # put bytes in a template, so the copy encodes them back to base64, as kro's
+    # error asks (pkg/cel/conversion/conversions.go:105 at v0.10.0: "encode it
+    # explicitly, e.g. base64.encode(...)").
     - id: agentKeyCopy
       template:
         apiVersion: v1

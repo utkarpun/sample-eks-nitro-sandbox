@@ -2,7 +2,7 @@
 # Shared settings, readings and guards for the self-running-agents scripts.
 # Sourced, never run on its own.
 #
-# Every AWS resource is made by ACK from the two kro graphs in kro/; these
+# Every AWS resource is made by ACK from the kro graphs (kro/ and bifrost/rgd.yaml); these
 # scripts only apply them, wait, read their status, and read AWS back.
 # Every kubectl call goes through kc() or kc_cluster(), which pin --context, so
 # a run never depends on the machine's current context.

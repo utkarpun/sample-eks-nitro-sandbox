@@ -8,7 +8,7 @@
 # deleted (kro docs, concepts/rgd/06-instances.md: "If a resource is manually
 # modified or deleted, kro detects the drift and automatically restores it"):
 #   - Never delete a run's Job alone: kro makes it again, which starts a second
-#     agent run. Delete the SraRun.
+#     agent run. Delete the SraRun, then its pod.
 #   - The Job has no ttlSecondsAfterFinished, for the same reason: a TTL delete
 #     is a Job delete.
 # Never edit an instance either: a Job's pod template is immutable, and kro
@@ -20,10 +20,13 @@
 # bifrost-agent-key its Job uses, which the SraGateway instance and
 # the Bifrost graph (bifrost/rgd.yaml) make first. Applied by setup.sh with the other two graphs.
 #
-# Never make a breaking schema change once this RGD is live (remove a field, add
-# a required field without a default, change a type): kro refuses the instance
-# CRD update and the instance stops reconciling, deletion included (seen in a
-# live test of the other graphs, on a removed field).
+# Never make a breaking schema change once this graph's CRD exists: one that
+# removes or narrows what an instance may hold, such as removing a field,
+# changing a type, adding a required field with no default, making a field
+# required, or adding or tightening a pattern, enum or limit (kro's full list:
+# pkg/graph/crd/compat/schema.go). kro refuses the CRD update and the instance
+# stops reconciling, deletion included (seen in a live test of the other
+# graphs, on a removed field).
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
 metadata:
@@ -58,7 +61,8 @@ spec:
             app.kubernetes.io/name: agent
             self-running-agents/run: ${schema.spec.runID}
         spec:
-          # No retry, a 15-minute cap, and no ttlSecondsAfterFinished (see the top).
+          # No retry, a 15-minute cap on the Job and on its pod (below), and no
+          # ttlSecondsAfterFinished (see the top).
           backoffLimit: 0
           activeDeadlineSeconds: 900
           template:
@@ -76,6 +80,8 @@ spec:
               automountServiceAccountToken: false
               enableServiceLinks: false
               restartPolicy: Never
+              # The pod's own 15-minute cap, so a pod the SraRun delete leaves (kro#1330) still stops.
+              activeDeadlineSeconds: 900
               nodeSelector: { kubernetes.io/arch: amd64 }
               securityContext:
                 runAsNonRoot: true
