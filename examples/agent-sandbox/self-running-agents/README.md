@@ -23,11 +23,9 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 ## Prerequisites
 
 - **A cluster.** An EKS Auto Mode cluster with Nitro sandboxes and network policy
-  enforcement on. Either make one with [`cluster/`](cluster/README.md), or bring your own,
-  as the [Hello sandbox](../../getting-started/hello-sandbox/README.md) sample makes it,
-  with enforcement turned on as the
-  [coding agent blueprint](../../getting-started/coding-agent/README.md)'s step 1 does.
-  `setup.sh` checks enforcement and stops if it is off.
+  enforcement on. Make one with Terraform in [`cluster/`](cluster/README.md), or use an
+  Auto Mode cluster you already have. `setup.sh` checks for the sandbox runtime class and
+  for enforcement, stops if either is missing, and prints how to turn enforcement on.
 - **Tools.** Terraform 1.5.7 or later; Docker with `linux/amd64` builds; the AWS CLI v2
   2.32.8 or later; `kubectl` within one minor version of the cluster; `helm` 3, `python3`,
   `openssl` and `sha256sum`.

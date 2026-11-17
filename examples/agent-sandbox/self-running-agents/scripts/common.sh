@@ -114,7 +114,7 @@ require_runtime_class() {
   local rc=0
   resource_exists kc_cluster runtimeclass isolated-sandbox || rc=$?
   case $rc in
-    1) die "runtimeclass isolated-sandbox is not on this cluster. Run the Hello sandbox sample first." ;;
+    1) die "runtimeclass isolated-sandbox is not on this cluster. Use an EKS Auto Mode cluster, such as the one cluster/ makes (see README.md, Make the cluster)." ;;
     2) die "could not read the cluster's runtime classes; stopping rather than guess" ;;
   esac
 }
