@@ -1,9 +1,0 @@
-# Bifrost's namespace. apply.sh creates it only when it is absent, and uses it
-# only when it carries this label. The name is in bootstrap/'s secret_namespaces
-# (lib.sh), so the ACK rds controller may read the database password Secret here.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: bfx
-  labels:
-    app.kubernetes.io/managed-by: bfx

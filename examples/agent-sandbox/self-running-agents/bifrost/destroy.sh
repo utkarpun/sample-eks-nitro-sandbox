@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Take Bifrost down: the Helm release, then the graph instance, which has ACK
 # delete the database (no final snapshot), its subnet group and security group,
-# the role and the Pod Identity association, then the namespace. Then read each
+# the role and the Pod Identity association, and kro delete the namespace last
+# (with the Secrets apply.sh made in it). Then read each
 # one back, from the cluster and from AWS by name. Leaves kro and ACK alone: they
 # come from bootstrap/.
 source "$(dirname "$0")/lib.sh"
@@ -18,12 +19,14 @@ case $rc in
       if hc -n "$BIFROST_NAMESPACE" uninstall bifrost --wait --timeout 5m >/dev/null; then echo "release bifrost removed"
       else fail "the release bifrost was not removed"; fi
     fi
-    if [[ -n "$(kb get bifrostbackend bifrost --ignore-not-found -o name 2>/dev/null)" ]]; then
+    if [[ -n "$(kc_cluster get bifrostbackend bifrost --ignore-not-found -o name 2>/dev/null)" ]]; then
       echo "deleting the graph (the RDS instance is most of the wait)"
-      kb delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time"
+      kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time"
     fi
+    # The instance delete has removed the namespace; this removes one left without
+    # an instance (it carries the label, so it is the sample's).
     if [[ $incomplete -eq 0 ]]; then
-      if kc_cluster delete namespace "$BIFROST_NAMESPACE" --wait --timeout=300s >/dev/null; then echo "namespace $BIFROST_NAMESPACE removed"
+      if kc_cluster delete namespace "$BIFROST_NAMESPACE" --ignore-not-found --wait --timeout=300s >/dev/null; then echo "namespace $BIFROST_NAMESPACE removed"
       else fail "namespace $BIFROST_NAMESPACE was not removed"; fi
     fi
     ;;

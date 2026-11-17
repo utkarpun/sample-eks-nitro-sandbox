@@ -10,13 +10,15 @@ What is code and what is not:
 
 - **The Bifrost Deployment** comes from the official Helm chart, with `values.yaml`.
 - **Everything around it** is one kro ResourceGraphDefinition, `rgd.yaml`, over AWS
-  Controllers for Kubernetes (ACK), and its one instance, `instance.yaml`: the Postgres
-  database on Amazon RDS with its security group and subnet group, Bifrost's IAM role and
-  its EKS Pod Identity association, the ServiceAccount, a fixed name for the database
-  (`Service bifrost-db`) and Bifrost's network policy. The namespace is `namespace.yaml`.
+  Controllers for Kubernetes (ACK), and its one instance, `instance.yaml`: Bifrost's
+  namespace, the Postgres database on Amazon RDS with its security group and subnet group,
+  Bifrost's IAM role and its EKS Pod Identity association, the ServiceAccount, a fixed name
+  for the database (`Service bifrost-db`), the pricing ConfigMap (from `pricing/`) and
+  Bifrost's network policy. The instance is cluster scoped, because it makes the namespace,
+  and deleting it deletes the namespace last.
 - **The four Secrets** (the database password, the encryption key, the admin login and the
-  agent's key) are made by `apply.sh` from random bytes, because a manifest would have to
-  hold their values.
+  agent's key) are made by `apply.sh` from random bytes, once the graph has made the
+  namespace: their values are random, and a kro graph cannot generate a random value.
 - kro and ACK are the sample's own EKS managed capabilities, from `bootstrap/`.
 - `apply.sh`, `test.sh` and `destroy.sh` wrap them: check the prerequisites, read the
   cluster's VPC, make the Secrets, apply, wait and read back.
@@ -85,8 +87,8 @@ The RDS instance bills from `apply.sh` until `destroy.sh` ends with `clean up co
 The names are fixed to fit `bootstrap/`'s scope (`bootstrap/variables.tf`): the namespace
 `bfx` is in its `secret_namespaces` (ACK reads the database password there), and the AWS
 names `bfx-bifrost` and `bfx-bifrost-db` and the tag `ManagedBy=bfx` match its
-`rds_prefix`. To change them, change `rds_prefix` and `secret_namespaces`, `lib.sh`,
-`namespace.yaml` and `instance.yaml` together.
+`rds_prefix`. To change them, change `rds_prefix` and `secret_namespaces`, `lib.sh` and
+`instance.yaml` together.
 
 The cluster, Region, kube context and model come from the sample's `.env`, as for the agent
 (`CLUSTER_NAME`, `AWS_REGION`, `KUBE_CONTEXT`, `BEDROCK_MODEL_ID`). The commands on this page use
@@ -172,7 +174,7 @@ TODO: output from the fresh run
 
 **If clean up is incomplete**, the lines above it say what is left. A graph that did not
 delete in time leaves the namespace, its Secrets and possibly the RDS instance, which keeps
-billing: check it with `kubectl --context <KUBE_CONTEXT> -n bfx get bifrostbackend bifrost -o yaml` and
+billing: check it with `kubectl --context <KUBE_CONTEXT> get bifrostbackend bifrost -o yaml` and
 `aws rds describe-db-instances --region <AWS_REGION> --db-instance-identifier bfx-bifrost`, then run
 `./bifrost/destroy.sh` again.
 

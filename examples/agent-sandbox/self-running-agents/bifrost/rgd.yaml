@@ -1,11 +1,18 @@
 # kro ResourceGraphDefinition: everything Bifrost needs around its Helm release.
 # AWS side through ACK: the Postgres store on RDS (security group, subnet group,
 # DB instance), the role Bifrost calls Bedrock with and its Pod Identity
-# association. Kubernetes side: the ServiceAccount, a fixed in-namespace name for
-# the database (Service bifrost-db) and Bifrost's network policy.
+# association. Kubernetes side: Bifrost's namespace, the ServiceAccount, a fixed
+# in-namespace name for the database (Service bifrost-db), the pricing ConfigMap
+# and Bifrost's network policy.
 # The Bifrost Deployment itself comes from the official Helm chart (values.yaml);
 # kro has no Helm resource, so apply.sh installs the chart once this instance is
-# ACTIVE. Every object lands in the instance's namespace.
+# ACTIVE. The four Secrets stay made by apply.sh: their values are random, and a
+# kro graph cannot generate a random value.
+#
+# Cluster scoped: the instance has no namespace, since it is the thing that makes
+# the namespace (as kro/base-rgd.yaml does for sra). Every namespaced child names
+# the Namespace, so kro deletes them before it. scope cannot change once the RGD
+# is live: an RGD applied before this change (namespaced) is deleted first.
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
 metadata:
@@ -14,7 +21,11 @@ spec:
   schema:
     apiVersion: v1alpha1
     kind: BifrostBackend
+    scope: Cluster
     spec:
+      # Bifrost's namespace, made by this graph. It must be in bootstrap/'s
+      # secret_namespaces, so the ACK rds controller may read the password there.
+      namespace: string | default="bfx"
       # Names every AWS resource: <prefix>-bifrost. The default is inside
       # bootstrap/'s rds_prefix, which scopes the ACK role to these names.
       prefix: string | default="bfx"
@@ -42,15 +53,40 @@ spec:
       # RDS Multi-AZ keeps a standby in a second AZ, which bills the instance and
       # its storage twice (README, Why the state is in Postgres).
       dbMultiAZ: boolean | default=false
+      # The two pricing files (bifrost/pricing/), as strings; apply.sh fills them.
+      pricingJSON: string | required=true
+      modelParametersJSON: string | required=true
     status:
       dbHost: ${db.status.endpoint.address}
   resources:
+    # The namespace, created with the label in the same object so it never exists
+    # unlabelled; apply.sh uses it only when it carries the label.
+    - id: ns
+      template:
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${schema.spec.namespace}
+          labels:
+            app.kubernetes.io/managed-by: ${schema.spec.managedBy}
+
+    # The database password, made by apply.sh once the namespace is there. Read
+    # only, never deleted by kro; db waits for it.
+    - id: dbSecret
+      externalRef:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: bifrost-db
+          namespace: ${ns.metadata.name}
+
     - id: dbSecurityGroup
       template:
         apiVersion: ec2.services.k8s.aws/v1alpha1
         kind: SecurityGroup
         metadata:
           name: ${schema.spec.prefix}-bifrost-db
+          namespace: ${ns.metadata.name}
         spec:
           name: ${schema.spec.prefix}-bifrost-db
           description: Postgres for Bifrost, from inside the cluster VPC only
@@ -74,6 +110,7 @@ spec:
         kind: DBSubnetGroup
         metadata:
           name: ${schema.spec.prefix}-bifrost
+          namespace: ${ns.metadata.name}
         spec:
           name: ${schema.spec.prefix}-bifrost
           description: Bifrost Postgres, the cluster's subnets
@@ -93,6 +130,7 @@ spec:
         kind: DBInstance
         metadata:
           name: ${schema.spec.prefix}-bifrost
+          namespace: ${ns.metadata.name}
         spec:
           dbInstanceIdentifier: ${schema.spec.prefix}-bifrost
           dbInstanceClass: ${schema.spec.dbInstanceClass}
@@ -108,8 +146,8 @@ spec:
           dbName: bifrost
           masterUsername: bifrost
           masterUserPassword:
-            namespace: ${schema.metadata.namespace}
-            name: bifrost-db
+            namespace: ${dbSecret.metadata.namespace}
+            name: ${dbSecret.metadata.name}
             key: password
           dbSubnetGroupName: ${dbSubnetGroup.spec.name}
           vpcSecurityGroupIDs:
@@ -126,6 +164,7 @@ spec:
         kind: Service
         metadata:
           name: bifrost-db
+          namespace: ${ns.metadata.name}
         spec:
           type: ExternalName
           externalName: ${db.status.endpoint.address}
@@ -143,11 +182,12 @@ spec:
         kind: Role
         metadata:
           name: ${schema.spec.prefix}-bifrost
+          namespace: ${ns.metadata.name}
         spec:
           name: ${schema.spec.prefix}-bifrost
           description: Bifrost model gateway (Pod Identity)
           assumeRolePolicyDocument: |
-            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"],"Condition":{"StringEquals":{"aws:SourceAccount":"${schema.spec.accountID}","aws:RequestTag/eks-cluster-arn":"arn:aws:eks:${schema.spec.region}:${schema.spec.accountID}:cluster/${schema.spec.clusterName}","aws:RequestTag/kubernetes-namespace":"${schema.metadata.namespace}","aws:RequestTag/kubernetes-service-account":"bifrost"}}}]}
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"],"Condition":{"StringEquals":{"aws:SourceAccount":"${schema.spec.accountID}","aws:RequestTag/eks-cluster-arn":"arn:aws:eks:${schema.spec.region}:${schema.spec.accountID}:cluster/${schema.spec.clusterName}","aws:RequestTag/kubernetes-namespace":"${ns.metadata.name}","aws:RequestTag/kubernetes-service-account":"bifrost"}}}]}
           inlinePolicies:
             bedrock: |
               {"Version":"2012-10-17","Statement":[{"Sid":"InvokeTheOneInferenceProfile","Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],"Resource":"arn:aws:bedrock:${schema.spec.region}:${schema.spec.accountID}:inference-profile/${schema.spec.modelID}"},{"Sid":"InvokeModelsOnlyThroughThatProfile","Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],"Resource":"arn:aws:bedrock:*::foundation-model/${schema.spec.foundationModelID}","Condition":{"StringEquals":{"bedrock:InferenceProfileArn":"arn:aws:bedrock:${schema.spec.region}:${schema.spec.accountID}:inference-profile/${schema.spec.modelID}"}}}]}
@@ -163,6 +203,7 @@ spec:
         kind: ServiceAccount
         metadata:
           name: bifrost
+          namespace: ${ns.metadata.name}
         automountServiceAccountToken: false
 
     - id: podIdentity
@@ -171,9 +212,10 @@ spec:
         kind: PodIdentityAssociation
         metadata:
           name: ${schema.spec.prefix}-bifrost
+          namespace: ${ns.metadata.name}
         spec:
           clusterName: ${schema.spec.clusterName}
-          namespace: ${schema.metadata.namespace}
+          namespace: ${ns.metadata.name}
           serviceAccount: ${serviceAccount.metadata.name}
           roleARN: ${role.status.ackResourceMetadata.arn}
           tags:
@@ -190,6 +232,7 @@ spec:
         kind: ApplicationNetworkPolicy
         metadata:
           name: bifrost
+          namespace: ${ns.metadata.name}
         spec:
           podSelector:
             matchLabels: { app.kubernetes.io/name: bifrost }
@@ -210,3 +253,16 @@ spec:
               ports: [ { protocol: TCP, port: 443 } ]
             - to: [ { ipBlock: { cidr: "${schema.spec.vpcCIDR}" } } ]
               ports: [ { protocol: TCP, port: 5432 } ]
+
+    # The model prices and parameters Bifrost reads locally (values.yaml mounts
+    # it), so it never fetches them from the internet.
+    - id: pricing
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: bifrost-pricing
+          namespace: ${ns.metadata.name}
+        data:
+          pricing.json: ${schema.spec.pricingJSON}
+          model-parameters.json: ${schema.spec.modelParametersJSON}

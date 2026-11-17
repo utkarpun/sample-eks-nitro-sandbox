@@ -22,7 +22,7 @@ require_runtime_class
 resolve_account
 LOG_DIR="${LOG_DIR:-$SAMPLE_DIR/../../../tmp/bifrost}"; mkdir -p "$LOG_DIR"
 # The model the instance was applied with, so the test calls what Bifrost allows.
-MODEL="$(kb get bifrostbackend bifrost -o jsonpath='{.spec.modelID}')"
+MODEL="$(kc_cluster get bifrostbackend bifrost -o jsonpath='{.spec.modelID}')"
 [[ -n "$MODEL" ]] || die "could not read the model from BifrostBackend bifrost; run ./bifrost/apply.sh first"
 OTHER_MODEL="us.anthropic.claude-haiku-4-5-20251001-v1:0"   # not in the key's allow-list
 PROBE_IMAGE="docker.io/maximhq/bifrost:v2.5.1@sha256:5ec9873acaf1687556b6e4dd854b92b539d9debf87a5a683b66338648b84d3c8"

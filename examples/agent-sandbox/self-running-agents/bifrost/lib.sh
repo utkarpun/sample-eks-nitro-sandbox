@@ -11,8 +11,8 @@ source "$BF_DIR/../scripts/common.sh"
 # Fixed names, inside bootstrap/'s scope (bootstrap/variables.tf): rds_prefix "bfx"
 # (the RDS instance, its subnet group and the bfx-* role), secret_namespaces "bfx"
 # (the rds controller reads the database password Secret only there) and the
-# security group's ManagedBy "bfx". namespace.yaml and instance.yaml carry the same
-# names; change them together with those variables.
+# security group's ManagedBy "bfx". instance.yaml carries the same names (its
+# graph makes the namespace); change them together with those variables.
 BIFROST_NAMESPACE=bfx
 BF_PREFIX=bfx
 BF_MANAGED_BY=bfx

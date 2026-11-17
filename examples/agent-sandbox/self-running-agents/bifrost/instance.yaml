@@ -1,12 +1,14 @@
 # This cluster's BifrostBackend (the graph in rgd.yaml). apply.sh fills each
-# <...> value from the cluster and the sample's .env (common.sh render) and
-# applies the result. prefix and managedBy match bootstrap/'s scope (lib.sh).
+# <...> value from the cluster and the sample's .env (common.sh render), and the
+# two pricing values from bifrost/pricing/ as JSON strings, and applies the
+# result. Cluster scoped: the instance makes the namespace. namespace, prefix and
+# managedBy match bootstrap/'s scope (lib.sh).
 apiVersion: kro.run/v1alpha1
 kind: BifrostBackend
 metadata:
   name: bifrost
-  namespace: bfx
 spec:
+  namespace: <BIFROST_NAMESPACE>
   prefix: bfx
   managedBy: bfx
   clusterName: <CLUSTER_NAME>
@@ -18,3 +20,5 @@ spec:
   agentNamespace: <NAMESPACE>
   modelID: <BEDROCK_MODEL_ID>
   foundationModelID: <FOUNDATION_MODEL_ID>
+  pricingJSON: <PRICING_JSON>
+  modelParametersJSON: <MODEL_PARAMETERS_JSON>
