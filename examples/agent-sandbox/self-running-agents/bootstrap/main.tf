@@ -165,6 +165,12 @@ resource "kubernetes_cluster_role_v1" "kro" {
     resources  = ["deployments"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
+  # The run's Job (kro/run-rgd.yaml SraRun).
+  rule {
+    api_groups = ["batch"]
+    resources  = ["jobs"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
   rule {
     api_groups = ["admissionregistration.k8s.io"]
     resources  = ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
@@ -180,10 +186,11 @@ resource "kubernetes_cluster_role_v1" "kro" {
     resources  = ["networkpolicies"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
-  # The example's instance kinds (kro/base-rgd.yaml SraBase, kro/gateway-rgd.yaml SraGateway).
+  # The example's instance kinds (kro/base-rgd.yaml SraBase, kro/gateway-rgd.yaml SraGateway,
+  # kro/run-rgd.yaml SraRun).
   rule {
     api_groups = ["kro.run"]
-    resources  = ["srabases", "srabases/status", "srabases/finalizers", "sragateways", "sragateways/status", "sragateways/finalizers"]
+    resources  = ["srabases", "srabases/status", "srabases/finalizers", "sragateways", "sragateways/status", "sragateways/finalizers", "sraruns", "sraruns/status", "sraruns/finalizers"]
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
 }
