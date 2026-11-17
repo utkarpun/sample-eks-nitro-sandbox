@@ -68,8 +68,10 @@ namespace_is_ours "$BIFROST_NAMESPACE" "$BF_MANAGED_BY" \
   || die "the graph did not make namespace $BIFROST_NAMESPACE, labelled, within 120 s: kubectl$CTX_ARG get bifrostbackend bifrost -o yaml"
 
 # 5. Secrets, made once from random bytes. Values go through files, never the
-#    command line. These stay in the script: their values must be secret, and a kro
-#    graph cannot make a secret value. The graph's database waits for
+#    command line. These stay in the script: their values must be secret, and kro's
+#    generators (`random.seededString`, `random.seededInt`) are deterministic from
+#    their seed, so a graph cannot make fresh random bytes; a secret value has to be
+#    made outside it. The graph's database waits for
 #    bifrost-db (rgd.yaml, dbSecret), and its copy of the agent's key in the
 #    agent's namespace for bifrost-agent-key (agentKey).
 rand() { openssl rand -hex 24; }

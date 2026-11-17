@@ -392,9 +392,9 @@ TODO: output from the fresh run
 **Step 2b: set up Bifrost.** Follow [Bifrost's README](bifrost/README.md). `bifrost/apply.sh`
 needs the namespace `sra` that `setup.sh` made, and its graph copies the agent's key into it;
 `run.sh` and `test.sh` stop until that key is there. Bifrost's four Secrets are made by
-`apply.sh`, not its graph: kro's only generator, `random.seededString`, is deterministic
-from a seed anyone who can read the instance can read, so a graph cannot make a secret value
-([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
+`apply.sh`, not its graph: kro's generators (`random.seededString`, `random.seededInt`) are
+deterministic from their seed, so a graph cannot make fresh random bytes; a secret value has
+to be made outside it ([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
 
 ```bash
 ./bifrost/apply.sh
@@ -566,11 +566,26 @@ manages. With the controller gone nothing removes them, so `cleanup.sh` and
 `bifrost/destroy.sh` time out and end incomplete. To see it, an object stays with a
 `deletionTimestamp` and its finalizer:
 `kubectl get <kind> -A -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers`.
-To recover, first delete in AWS, by name, each object the scripts' `read back` lines name
-as present, then remove the finalizer from each stuck object:
-`kubectl -n <namespace> patch <kind> <name> --type=merge -p '{"metadata":{"finalizers":null}}'`
-(no `-n` for the cluster-scoped `SraBase`, `SraGateway` and `BifrostBackend`). Removing an ACK finalizer
-before the AWS delete leaves that AWS object with nothing to remove it.
+The recovery depends on which is gone. These steps have not been run live.
+
+- **kro gone, ACK running:** do not delete in AWS by hand. kro no longer deletes its ACK
+  objects, and ACK makes an AWS object again when it reads it as deleted. Delete the ACK
+  objects with kubectl, Bifrost's in `bfx` and the sample's in `sra`:
+
+  ```bash
+  kubectl -n bfx delete --all dbinstances.rds.services.k8s.aws,dbsubnetgroups.rds.services.k8s.aws,securitygroups.ec2.services.k8s.aws,roles.iam.services.k8s.aws,podidentityassociations.eks.services.k8s.aws
+  kubectl -n sra delete --all buckets.s3.services.k8s.aws,repositories.ecr.services.k8s.aws,gateways.bedrockagentcorecontrol.services.k8s.aws,gatewaytargets.bedrockagentcorecontrol.services.k8s.aws,policies.bedrockagentcorecontrol.services.k8s.aws,policyengines.bedrockagentcorecontrol.services.k8s.aws,loggroups.cloudwatchlogs.services.k8s.aws,functions.lambda.services.k8s.aws,roles.iam.services.k8s.aws,podidentityassociations.eks.services.k8s.aws
+  ```
+
+  Wait until a `get` of the same kinds in each namespace lists none, then remove
+  `kro.run/finalizer` from each instance:
+  `kubectl patch <kind> <name> --type=merge -p '{"metadata":{"finalizers":null}}'` (add
+  `-n sra` for an `SraRun`; `SraBase`, `SraGateway` and `BifrostBackend` are cluster scoped).
+- **ACK gone:** delete in AWS, by name, each object the scripts' `read back` lines name as
+  present, then remove the ACK finalizer from each stuck object:
+  `kubectl -n <namespace> patch <kind> <name> --type=merge -p '{"metadata":{"finalizers":null}}'`.
+  Removing an ACK finalizer before the AWS delete leaves that AWS object with nothing to
+  remove it.
 
 ```bash
 cd bootstrap

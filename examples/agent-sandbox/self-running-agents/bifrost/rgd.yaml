@@ -8,9 +8,9 @@
 # The Bifrost Deployment itself comes from the official Helm chart (values.yaml);
 # kro has no Helm resource, so apply.sh installs the chart once this instance is
 # ACTIVE. The four Secrets stay made by apply.sh: their values must be secret, and
-# kro's only generator, `random.seededString`, is deterministic from a seed anyone
-# who can read the instance can read, so a graph cannot make a secret value (kro
-# CEL libraries, https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md).
+# kro's generators (`random.seededString`, `random.seededInt`) are deterministic
+# from their seed, so a graph cannot make fresh random bytes; a secret value has to
+# be made outside it (kro CEL libraries, https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md).
 #
 # Cluster scoped: the instance has no namespace, since it is the thing that makes
 # the namespace (as kro/base-rgd.yaml does for sra). Every namespaced child names

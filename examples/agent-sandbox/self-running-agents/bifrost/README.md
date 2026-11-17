@@ -22,9 +22,9 @@ What is code and what is not:
   the sample's first fresh run.
 - **The four Secrets** (the database password, the encryption key, the admin login and the
   agent's key) are made by `apply.sh` from random bytes, once the graph has made the
-  namespace: their values must be secret, and kro's only generator, `random.seededString`,
-  is deterministic from a seed anyone who can read the instance can read, so a graph cannot
-  make a secret value ([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
+  namespace: their values must be secret, and kro's generators (`random.seededString`,
+  `random.seededInt`) are deterministic from their seed, so a graph cannot make fresh random
+  bytes; a secret value has to be made outside it ([kro CEL libraries](https://github.com/kubernetes-sigs/kro/blob/main/website/docs/docs/concepts/expressions/02-cel-libraries.md)).
 - kro and ACK are the sample's own EKS managed capabilities, from `bootstrap/`.
 - `apply.sh`, `test.sh` and `destroy.sh` wrap them: check the prerequisites, read the
   cluster's VPC, make the Secrets, apply, wait and read back.
@@ -120,8 +120,8 @@ copy the same two entries, then run `apply.sh` again.
 ./bifrost/apply.sh
 ```
 
-The output blocks on this page are from one fresh run of `apply.sh`, `test.sh` and
-`destroy.sh` on the sample's bootstrap.
+The output blocks on this page will come from one fresh run of `apply.sh`, `test.sh` and
+`destroy.sh`; Bifrost's graph has not yet run on a cluster.
 
 ```text
 TODO: output from the fresh run

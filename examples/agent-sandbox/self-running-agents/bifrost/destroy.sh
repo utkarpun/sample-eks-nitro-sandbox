@@ -26,12 +26,19 @@ esac
 
 # The instance is cluster scoped, so it can outlive the namespace (apply.sh dies at
 # its namespace wait after applying it): delete it whether or not the namespace is there.
-rc=0; resource_exists kc_cluster bifrostbackend bifrost || rc=$?
-case $rc in
-  0) echo "deleting the graph (the RDS instance is most of the wait)"
-     kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time" ;;
-  2) fail "could not read the graph instance bifrost, so it may be left" ;;
+# With the instance kind's CRD gone (an earlier run deleted it), no instance can be
+# left and the kind cannot be read, so the instance step and the list below are skipped.
+crd_rc=0; resource_exists kc_cluster crd bifrostbackends.kro.run || crd_rc=$?
+case $crd_rc in
+  0) rc=0; resource_exists kc_cluster bifrostbackend bifrost || rc=$?
+     case $rc in
+       0) echo "deleting the graph (the RDS instance is most of the wait)"
+          kc_cluster delete bifrostbackend bifrost --wait --timeout=1500s || fail "the graph instance was not deleted in time" ;;
+       2) fail "could not read the graph instance bifrost, so it may be left" ;;
+     esac ;;
+  2) fail "could not read the CRD bifrostbackends.kro.run, so the graph instance bifrost may be left" ;;
 esac
+list_instances() { [[ $crd_rc -eq 1 ]] || kc_cluster get bifrostbackends -A -o name 2>/dev/null; }
 
 # The instance delete has removed the namespace; this removes one left without
 # an instance (it carries the label, so it is the sample's).
@@ -54,7 +61,7 @@ esac
 # then the instance kind's CRD, which kro leaves behind.
 rc=0; resource_exists kc_cluster rgd bifrost-backend || rc=$?
 case $rc in
-  0) if left="$(kc_cluster get bifrostbackends -A -o name 2>/dev/null)"; then
+  0) if left="$(list_instances)"; then
        if [[ -z "$left" ]]; then
          if kc_cluster delete -f "$BF_DIR/rgd.yaml" >/dev/null; then
            kc_cluster delete crd bifrostbackends.kro.run --ignore-not-found >/dev/null || fail "the CRD bifrostbackends.kro.run was not removed"
