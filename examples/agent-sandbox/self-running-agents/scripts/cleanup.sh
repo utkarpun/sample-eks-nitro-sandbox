@@ -2,11 +2,12 @@
 # Remove everything setup.sh and run.sh created, and say what could not be
 # removed. Every AWS object is ACK's, made by a kro instance, so the clean up
 # deletes the instances and kro deletes their objects in reverse order: the
-# SraGateway instance first, then the run bucket's objects (data, which ACK does
-# not delete), then the SraBase instance (the namespace goes last), then the two
-# graphs. It then reads AWS and the cluster back; a read that fails is "could
-# not determine", never "gone". It never touches a shared install, a cluster-wide
-# setting or the controllers from bootstrap/.
+# SraRun instances (the runs) first, then the SraGateway instance, then the run
+# bucket's objects (data, which ACK does not delete), then the SraBase instance
+# (the namespace goes last), then the three graphs. It then reads AWS and the
+# cluster back; a read that fails is "could not determine", never "gone". It
+# never touches a shared install, a cluster-wide setting or the controllers from
+# bootstrap/.
 source "$(dirname "$0")/common.sh" || exit 1
 set +e
 require_commands aws "$KUBECTL"
@@ -42,7 +43,17 @@ delete_instance() {
 step "1/5 the runs"
 BASE_GONE=0; instance_gone srabase || BASE_GONE=$?
 if [[ $BASE_GONE -eq 1 ]]; then
-  kc delete job -l app.kubernetes.io/name=agent --ignore-not-found --wait=true --timeout=120s || fail "agent jobs"
+  # A run is an SraRun instance; deleting it deletes its Job (kro/run-rgd.yaml).
+  rc=0; resource_exists kc_cluster crd sraruns.kro.run || rc=$?
+  case $rc in
+    0) kc delete sraruns --all --wait=true --timeout=120s || fail "the SraRun instances" ;;
+    1) echo "  no SraRun kind on the cluster" ;;
+    *) fail "could not read crd sraruns.kro.run" ;;
+  esac
+  # kro makes a Job deleted alone again, so check that no run's Job is left.
+  if jobs="$(kc get jobs -l app.kubernetes.io/name=agent -o name 2>/dev/null)"; then
+    [[ -z "$jobs" ]] && echo "  no agent Job is left" || fail "agent Jobs still there: ${jobs//$'\n'/ }"
+  else fail "could not read the agent Jobs"; fi
 else echo "  no SraBase $INSTANCE, so no namespace of the sample's to clean"; fi
 
 step "2/5 the SraGateway instance"
@@ -61,13 +72,14 @@ else fail "SraBase $INSTANCE kept, because the SraGateway instance is not gone; 
 
 step "5/5 the graphs"
 if [[ $GW_OK -eq 0 && $BASE_OK -eq 0 ]]; then
-  kc_cluster delete rgd sra-gateway sra-base --ignore-not-found --wait=true --timeout=120s || fail "the graphs"
+  kc_cluster delete rgd sra-run sra-gateway sra-base --ignore-not-found --wait=true --timeout=120s || fail "the graphs"
   # kro leaves an instance kind's CRD behind when its graph is deleted.
-  kc_cluster delete crd sragateways.kro.run srabases.kro.run --ignore-not-found || fail "the instance CRDs"
+  kc_cluster delete crd sraruns.kro.run sragateways.kro.run srabases.kro.run --ignore-not-found || fail "the instance CRDs"
 else fail "the graphs kept, because an instance is not gone"; fi
 
 step "read back"
-for r in rgd/sra-gateway rgd/sra-base crd/sragateways.kro.run crd/srabases.kro.run namespace/"$NAMESPACE" \
+for r in rgd/sra-run rgd/sra-gateway rgd/sra-base crd/sraruns.kro.run crd/sragateways.kro.run crd/srabases.kro.run \
+         namespace/"$NAMESPACE" \
          validatingadmissionpolicy/"$SAMPLE-$NAMESPACE" validatingadmissionpolicybinding/"$SAMPLE-$NAMESPACE"; do
   rc=0; resource_exists kc_cluster "$r" || rc=$?
   case $rc in
