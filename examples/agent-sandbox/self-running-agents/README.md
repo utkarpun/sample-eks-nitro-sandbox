@@ -13,7 +13,7 @@ the gateway. The policy engine's mode (`ENFORCE`) is a field on the gateway; who
 permission is the real control. The agent's role has no such permission. Its gaps are listed under [What this blueprint does not limit](#what-this-blueprint-does-not-limit).
 
 Every piece of infrastructure is code. The AWS resources and the sample's Kubernetes
-objects are two kro graphs (`kro/`), whose AWS objects the AWS Controllers for Kubernetes
+objects are kro graphs (`kro/`), whose AWS objects the AWS Controllers for Kubernetes
 (ACK) create; both controllers are EKS managed capabilities that a small Terraform stack
 (`bootstrap/`) turns on. The scripts only apply the graphs, wait, upload the tool's code and
 push the agent image, run, check and delete.
@@ -84,26 +84,30 @@ TODO: output from the fresh run
 
 | Piece | What it is | Where it runs |
 |---|---|---|
-| The agent run | A Kubernetes Job: Claude Code with `-p`, one prompt, then exit | An isolated Nitro sandbox pod in the sample's namespace |
+| The agent run | An `SraRun` kro instance whose one child is a Kubernetes Job: Claude Code with `-p`, one prompt, then exit | An isolated Nitro sandbox pod in the sample's namespace |
 | The bridge | `mcp-proxy-for-aws-cli`, a stdio MCP server that signs each request with SigV4 | Inside the agent pod, started by Claude Code |
 | The tool door | An AgentCore Gateway, MCP protocol, inbound auth `AWS_IAM` | AWS, managed |
 | The policy | A Cedar policy engine in `ENFORCE` mode on the gateway, with one `permit` | AWS, managed |
 | The tool | A Lambda function with two read-only tools, `get_time` and `get_host_info` | AWS Lambda |
 | The model gateway | Bifrost, which calls Bedrock with its own role for requests that carry the agent's key | A Deployment in the namespace `bfx` ([bifrost/](bifrost/README.md)) |
 | The run's state | `runs/<run id>/` in a run bucket | Amazon S3 |
-| The infrastructure | Two kro graphs, `SraBase` and `SraGateway`, over ACK | The EKS managed kro and ACK capabilities |
+| The infrastructure | Three kro graphs, `SraBase` and `SraGateway` over ACK, and `SraRun`, one instance per run | The EKS managed kro and ACK capabilities |
 
 A run goes like this:
 
-1. `scripts/run.sh` creates a Job for the run and follows its logs from the moment the pod
-   starts.
+1. `scripts/run.sh` creates an `SraRun` instance for the run, whose one child is the run's
+   Job (`kro/run-rgd.yaml`), and follows its logs from the moment the pod starts.
 2. Before anything else the pod waits until its egress rule is in force (the egress gate,
    below).
 3. Claude Code starts the bridge, which lists the gateway's tools as the pod's IAM role.
    The gateway lists only the tools the Cedar policy permits that role: `clock___get_time`.
 4. The model calls `clock___get_time`. The gateway asks the policy engine, the policy
    permits it, and the gateway invokes the Lambda function.
-5. The pod copies the run's stream to the run bucket, exits, and `run.sh` deletes the Job.
+5. The pod copies the run's stream to the run bucket, exits, and `run.sh` deletes the
+   `SraRun` instance, which deletes the Job.
+
+Never delete a run's Job by hand, only its `SraRun`: kro makes a deleted Job again, which
+starts a second run.
 
 ### Design
 
@@ -185,14 +189,15 @@ retention), the policy engine `sra_policy` and its one policy, the gateway `sra-
 target `clock`, the Pod Identity association, and in the cluster a
 `ValidatingAdmissionPolicy` and its binding (cluster-scoped, named for the namespace and
 matching only it), the ServiceAccount, the egress rule and a ConfigMap with the bridge's
-configuration and the prompt. Each AWS resource that takes tags is tagged
+configuration and the prompt. `SraRun` (`kro/run-rgd.yaml`): one run's Job in `sra`, with no
+`ttlSecondsAfterFinished`, since a TTL delete is a Job deleted alone. Each AWS resource that takes tags is tagged
 `Project=<PROJECT_TAG>` (`PROJECT_TAG` in `.env`, default `self-running-agents`) and `ManagedBy=sra` (the target and the Cedar policy take none;
 they belong to the tagged gateway and engine). The names are fixed in `kro/base.yaml` and
 `kro/gateway.yaml` and match `bootstrap/`'s `prefix`, which scopes the ACK role to them.
 
 **Order.** kro orders each graph by its references (the order is in the comment at the
 top of `kro/gateway-rgd.yaml`). `SraBase` goes first, because the function's code is read
-from its bucket. `cleanup.sh` deletes the `SraGateway` instance,
+from its bucket. `cleanup.sh` deletes the `SraRun` instances, the `SraGateway` instance,
 empties the bucket, deletes the `SraBase` instance (kro deletes each graph in reverse, the
 namespace last) and the graphs, then reads every AWS resource back.
 
@@ -301,7 +306,7 @@ with them the pods need no route to the internet. This sample uses the public en
 |---|---|
 | `.env.example` | The local values the scripts read; copy to `.env` |
 | `cluster/*.tf` | The cluster path: the EKS Auto Mode cluster, its VPC and the network policy ConfigMap, applied in two phases (`cluster/main.tf`) |
-| `bootstrap/*.tf` | Step 0: the EKS managed kro and ACK capabilities, their IAM role, and kro's RBAC for the ACK kinds |
+| `bootstrap/*.tf` | Step 0: the EKS managed kro and ACK capabilities, their IAM role, and kro's RBAC for the ACK kinds and the run's Job |
 | `kro/base-rgd.yaml`, `kro/base.yaml` | The `SraBase` graph (namespace, run bucket, image repository) and its one instance |
 | `kro/gateway-rgd.yaml`, `kro/gateway.yaml` | The `SraGateway` graph (gateway, Cedar policy, tool, roles, Pod Identity, admission, egress, the agent's ConfigMap) and its one instance |
 | `Dockerfile`, `.dockerignore` | The agent image: Claude Code, the bridge, and `agent/` |
@@ -311,7 +316,7 @@ with them the pods need no route to the internet. This sample uses the public en
 | `agent/prompt.txt` | The prompt's text; `kro/gateway.yaml` carries the copy a run uses |
 | `agent/mcp_call.py` | Lists and calls the gateway's tools with no model in the loop |
 | `tool/handler.py` | The Lambda function behind the gateway target |
-| `deploy/run-job.yaml` | One run's Job, its model calls pointed at Bifrost |
+| `kro/run-rgd.yaml`, `deploy/run.yaml` | The `SraRun` graph (one run's Job, its model calls pointed at Bifrost) and the instance `run.sh` renders per run |
 | `bifrost/` | Bifrost, the model gateway, with its own apply, test and destroy ([README](bifrost/README.md)) |
 | `scripts/setup.sh`, `run.sh`, `test.sh`, `cleanup.sh` | Apply, run, check and remove; `common.sh` is shared |
 
@@ -325,8 +330,8 @@ on the pod's own lines is fixed in `agent/run.sh`.
 
 **Step 0: turn on kro and ACK.** Once per cluster. The stack makes one IAM role for both
 capabilities, the ACK and kro capabilities, a Secret reader access policy in the namespaces
-`secret_namespaces` names, and a ClusterRole that lets kro manage the ACK kinds the graphs
-use. Its `rds_prefix` and RDS statements are for [Bifrost](bifrost/README.md); they create
+`secret_namespaces` names, and a ClusterRole that lets kro manage the ACK kinds and the
+Kubernetes objects the graphs use, the run's Job (`batch` `jobs`) included. Its `rds_prefix` and RDS statements are for [Bifrost](bifrost/README.md); they create
 nothing on their own.
 
 ```bash
@@ -362,7 +367,7 @@ After `aws eks update-kubeconfig`, the context is the cluster's ARN, which
 not your CLI's default.
 
 **Step 2: set everything up.** `setup.sh` checks the runtime class, network policy
-enforcement and the kro and ACK kinds, and changes none of them. It applies the two graphs
+enforcement and the kro and ACK kinds, and changes none of them. It applies the three graphs
 and the `SraBase` instance and waits for it, uploads the tool's zip to the run bucket
 (`tool/clock-<hash>.zip`) and pushes the agent image to the repository, then applies the
 `SraGateway` instance and waits until it is `ACTIVE`. It stops if a namespace `sra` exists
@@ -473,11 +478,11 @@ of the same Job (the pod is unchanged) with the gate replaced by a loop that req
 - **The run's logs.** Read a past run from the bucket:
   `aws s3 cp s3://<run bucket>/runs/<run id>/stream.jsonl -`.
 - **Limits.** A run is stopped at 15 minutes (`activeDeadlineSeconds`), is not retried, and
-  the model gets at most 8 turns; change them in `deploy/run-job.yaml` and `agent/run.sh`.
-- **A failed run.** `run.sh` prints the Job's verdict and deletes the Job, so read the
+  the model gets at most 8 turns; change them in `kro/run-rgd.yaml` and `agent/run.sh`.
+- **A failed run.** `run.sh` prints the Job's verdict and deletes the run's `SraRun`, so read the
   streamed output or, if the pod got past the egress gate, `runs/<run id>/` in the bucket; a pod exit of 3 means the egress gate
-  failed and stored nothing. A Job with no verdict 60 s after its logs end, or whose pod does not start within
-  10 minutes, is left for `cleanup.sh`.
+  failed and stored nothing. A run with no verdict 60 s after its logs end, or whose pod does not start within
+  10 minutes, leaves its `SraRun` for `cleanup.sh`.
 - **Where a refusal is recorded.** The gateway's own logs do not carry policy decisions; the
   `DenyDecisions` metric in `AWS/Bedrock-AgentCore` does, by default:
   `aws cloudwatch get-metric-statistics --namespace AWS/Bedrock-AgentCore --metric-name DenyDecisions ...`.
@@ -523,10 +528,11 @@ aws eks describe-cluster --name <CLUSTER_NAME> --region us-west-2 \
 `bifrost/destroy.sh` uninstalls Bifrost's Helm release and deletes its graph instance, which
 has ACK delete the RDS database (no final snapshot), its subnet group and security group,
 Bifrost's IAM role and its Pod Identity association; it waits up to 25 minutes for that.
-Then it deletes the namespace `bfx` and the agent's copy of the key in `sra`. `cleanup.sh`
-then deletes the run Jobs and the `SraGateway` instance, empties the run bucket, deletes the
-`SraBase` instance (the bucket, the image repository and the namespace `sra`) and the two
-graphs. Each script is done when its last line is `clean up complete`. If one ends
+kro deletes the namespace `bfx` last, with the Secrets in it; then the script deletes the
+agent's copy of the key in `sra`. `cleanup.sh` then deletes the runs' `SraRun` instances
+(and reads that no run's Job is left) and the `SraGateway` instance, empties the run bucket,
+deletes the `SraBase` instance (the bucket, the image repository and the namespace `sra`)
+and the three graphs. Each script is done when its last line is `clean up complete`. If one ends
 `clean up incomplete` (Bifrost) or `clean up INCOMPLETE: <n> item(s) above` (the sample), the
 lines above it name what is left: run that script again before you go on. A database left
 behind keeps billing, and its security group blocks the VPC delete in step 4.

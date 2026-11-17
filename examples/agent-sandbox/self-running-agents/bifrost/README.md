@@ -101,7 +101,9 @@ needs its entries in `pricing/`.
 each that Bifrost reads for this model (`bedrock/us.anthropic.claude-sonnet-5-5` and
 `us.anthropic.claude-sonnet-5-5`), copied on 2026-11-16 from the chart's default sources,
 `https://getbifrost.ai/datasheet` and `https://getbifrost.ai/datasheet/model-parameters`, so
-Bifrost needs no egress for them. To refresh, download both and copy the same two entries.
+Bifrost needs no egress for them. `apply.sh` puts both files into the instance as strings,
+and the graph makes the ConfigMap `bifrost-pricing` from them. To refresh, download both and
+copy the same two entries, then run `apply.sh` again.
 
 ## Bring it up
 
