@@ -498,48 +498,124 @@ the agent a tool that runs code or opens a connection.
 
 ## Clean up
 
-Bifrost first, which removes its key from `sra` and its database
-([Bifrost's clean up](bifrost/README.md#clean-up)), then the sample:
+Do these steps in order, from this folder (`examples/agent-sandbox/self-running-agents`)
+of the clone that ran the setup, with the same `.env` and the same AWS credentials. Each
+step needs the one before it to have ended clean, because each removes something the next
+one depends on, and the Terraform state of `bootstrap/` and `cluster/` is only in this
+clone. Every script below reads what it removed back from the cluster and from AWS, and a
+read it could not make counts as not gone. Step 5 checks everything once more at the end.
+
+**Step 1: note the cluster's KMS key.** On the `cluster/` path only, while the cluster is
+still up. The destroy in step 4 removes the key's alias, so step 5 needs the key's ARN:
+
+```bash
+aws eks describe-cluster --name <CLUSTER_NAME> --region us-west-2 \
+  --query 'cluster.encryptionConfig[0].provider.keyArn' --output text
+```
+
+**Step 2: remove Bifrost, then the sample.**
 
 ```bash
 ./bifrost/destroy.sh
 ./scripts/cleanup.sh
 ```
 
+`bifrost/destroy.sh` uninstalls Bifrost's Helm release and deletes its graph instance, which
+has ACK delete the RDS database (no final snapshot), its subnet group and security group,
+Bifrost's IAM role and its Pod Identity association; it waits up to 25 minutes for that.
+Then it deletes the namespace `bfx` and the agent's copy of the key in `sra`. `cleanup.sh`
+then deletes the run Jobs and the `SraGateway` instance, empties the run bucket, deletes the
+`SraBase` instance (the bucket, the image repository and the namespace `sra`) and the two
+graphs. Each script is done when its last line is `clean up complete`. If one ends
+`clean up incomplete` (Bifrost) or `clean up INCOMPLETE: <n> item(s) above` (the sample), the
+lines above it name what is left: run that script again before you go on. A database left
+behind keeps billing, and its security group blocks the VPC delete in step 4.
+
 ```text
 TODO: output from the fresh run
 ```
 
-Then, only if nothing else on the cluster uses the kro and ACK capabilities (another
-sample's graphs, or Bifrost's), remove them:
+**Step 3: remove kro and ACK.** Only if nothing else on the cluster uses the capabilities
+(another sample's graphs). They are made with `delete_propagation_policy = "RETAIN"`
+(`bootstrap/main.tf`), so deleting them does not delete what the graphs made: both scripts
+in step 2 must have ended `clean up complete` first.
 
 ```bash
 cd bootstrap
 terraform destroy -var cluster_name=<CLUSTER_NAME> -var region=us-west-2
 cd ..
+aws eks list-capabilities --cluster-name <CLUSTER_NAME> --region us-west-2
 ```
+
+Done when the destroy ends `Destroy complete!` and the last command lists no capability
+(`"capabilities": []`).
 
 ```text
 TODO: output from the fresh run
 ```
 
-Last, on the `cluster/` path, remove the cluster, its VPC and the network policy ConfigMap:
+**Step 4: remove the cluster.** On the `cluster/` path only; on your own cluster, skip to
+step 5. One destroy removes the network policy ConfigMap, then the cluster, its IAM roles and
+log group, and the VPC with its three NAT gateways.
 
 ```bash
 cd cluster
 terraform destroy -var 'endpoint_public_access_cidrs=["<your IP>/32"]'
+cd ..
 ```
+
+Done when it ends `Destroy complete!`. If it stops on the VPC, something step 2 missed is
+still in it (a load balancer, a network interface or a security group). List them, with the
+VPC id from the error, then delete what you find and run the destroy again:
+
+```bash
+aws ec2 describe-network-interfaces --region us-west-2 --include-managed-resources \
+  --filters Name=vpc-id,Values=<vpc id> --query 'NetworkInterfaces[].[NetworkInterfaceId,Description]'
+aws ec2 describe-security-groups --region us-west-2 \
+  --filters Name=vpc-id,Values=<vpc id> --query 'SecurityGroups[].[GroupId,GroupName]'
+```
+
+Auto Mode's network interfaces are hidden without `--include-managed-resources`. A VPC's
+`default` security group goes with the VPC; it is not a leftover.
 
 ```text
 TODO: output from the fresh run
 ```
 
-**What stays.** On the `cluster/` path, its `terraform destroy` removes the cluster with its
-runtime classes and network policy enforcement; the cluster's secrets KMS key stays pending
-deletion for 30 days, and `cluster/main.tf` names what can block the VPC delete and how to
-find it. On your own cluster, the runtime classes and network policy enforcement stay, which
-this sample only reads. On either, the capabilities stay until you destroy `bootstrap/`. On
-your machine: the agent image in Docker's local store (`docker image rm <image>`),
-Terraform's state in `bootstrap/` (and `cluster/`),
-and `tmp/self-running-agents/` at the clone's root with test.sh's logs (or `LOG_DIR`). Auto Mode removes the run's node on its
-own.
+**Step 5: check that everything is gone.** Set the two values, then run each read. Each
+"gone" answer is an error or an empty list, as the second column says.
+
+```bash
+C=<CLUSTER_NAME>; R=us-west-2
+```
+
+| Read | Gone when it prints |
+|---|---|
+| `aws rds describe-db-instances --region $R --db-instance-identifier bfx-bifrost` | `DBInstanceNotFound` |
+| `aws rds describe-db-subnet-groups --region $R --db-subnet-group-name bfx-bifrost` | `DBSubnetGroupNotFoundFault` |
+| `aws iam get-role --role-name bfx-bifrost` (and again for `sra-agent`, `sra-gateway`, `sra-tool`, `sra-capability`) | `NoSuchEntity`, each time |
+| `aws lambda get-function --region $R --function-name sra-clock` | `ResourceNotFoundException` |
+| `aws ecr describe-repositories --region $R --repository-names sra` | `RepositoryNotFoundException` |
+| `aws s3api head-bucket --bucket sra-runs-<ACCOUNT_ID>-$R` | `Not Found` (404) |
+| `aws bedrock-agentcore-control list-gateways --region $R --query "items[?name=='sra-gw']"` | `[]` |
+| `aws bedrock-agentcore-control list-policy-engines --region $R --query "policyEngines[?name=='sra_policy']"` | `[]` |
+| `aws eks describe-cluster --region $R --name $C` | `ResourceNotFoundException` (`cluster/` path) |
+| `aws ec2 describe-vpcs --region $R --filters Name=tag:Name,Values=$C --query 'Vpcs[].VpcId'` | `[]` (`cluster/` path) |
+| `` aws ec2 describe-nat-gateways --region $R --filter "Name=tag:Name,Values=$C*" --query 'NatGateways[?State!=`deleted`].NatGatewayId' `` | `[]` (`cluster/` path) |
+| `aws ec2 describe-addresses --region $R --filters "Name=tag:Name,Values=$C*" --query 'Addresses[].AllocationId'` | `[]` (`cluster/` path; the NAT gateways' addresses) |
+| `aws ec2 describe-volumes --region $R --include-managed-resources --filters Name=tag-key,Values=eks:eks-cluster-name --query 'Volumes[].[VolumeId,Tags]'` | no volume tagged with your cluster's name |
+| `aws logs describe-log-groups --region $R --log-group-name-prefix /aws/eks/$C/cluster --query 'logGroups[].logGroupName'` | `[]` (`cluster/` path) |
+| `aws kms describe-key --region $R --key-id <the key ARN from step 1> --query KeyMetadata.KeyState` | `PendingDeletion` (`cluster/` path) |
+| `aws resourcegroupstaggingapi get-resources --region $R --tag-filters Key=ManagedBy,Values=sra,bfx --query 'ResourceTagMappingList[].ResourceARN'` | `[]` |
+
+The tagging read can still list a resource for hours after it was deleted, so check any ARN
+it prints with that resource's own read before you treat it as left. An EBS volume EKS Auto
+Mode made belongs to no VPC, so step 4 does not catch it, and it keeps billing until you
+delete it (`aws ec2 delete-volume --region $R --volume-id <id>`).
+
+**What stays.** The cluster's secrets KMS key stays pending deletion for 30 days. On your own
+cluster, the runtime classes and network policy enforcement stay, which this sample only
+reads, and the capabilities stay if you skipped step 3. On your machine: the agent image in
+Docker's local store (`docker image rm <image>`), Terraform's state in `bootstrap/` (and
+`cluster/`), and `tmp/self-running-agents/` at the clone's root with test.sh's logs (or
+`LOG_DIR`). Auto Mode removes the run's node on its own.
