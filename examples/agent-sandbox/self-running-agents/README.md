@@ -104,7 +104,7 @@ A run goes like this:
 4. The model calls `clock___get_time`. The gateway asks the policy engine, the policy
    permits it, and the gateway invokes the Lambda function.
 5. The pod copies the run's stream to the run bucket, exits, and `run.sh` deletes the
-   `SraRun` instance, which deletes the Job.
+   `SraRun` instance, which deletes the Job, then the pod, which kro leaves (kro#1330).
 
 Never delete a run's Job by hand, only its `SraRun`: kro makes a deleted Job again, which
 starts a second run.
@@ -328,11 +328,12 @@ with `<CLUSTER_NAME>`, and the generated ids of the gateway, the policy engine a
 Identity association with `<id>`; long blocks are abridged where marked. The `sra:` prefix
 on the pod's own lines is fixed in `agent/run.sh`.
 
-**Step 0: turn on kro and ACK.** Once per cluster. The stack makes one IAM role for both
+**Step 0: turn on kro and ACK.** Once per cluster, and again (`terraform apply` in
+`bootstrap/`) after you pull a change to it, such as the run's Job rule. The stack makes one IAM role for both
 capabilities, the ACK and kro capabilities, a Secret reader access policy in the namespaces
 `secret_namespaces` names, and a ClusterRole that lets kro manage the ACK kinds and the
-Kubernetes objects the graphs use, the run's Job (`batch` `jobs`) included. Its `rds_prefix` and RDS statements are for [Bifrost](bifrost/README.md); they create
-nothing on their own.
+Kubernetes objects the graphs use, the run's Job (`batch` `jobs`) included. Its `rds_prefix` and RDS statements are for
+[Bifrost](bifrost/README.md); they create nothing on their own.
 
 ```bash
 cd bootstrap
@@ -383,7 +384,8 @@ TODO: output from the fresh run
 
 **Step 2b: set up Bifrost.** Follow [Bifrost's README](bifrost/README.md). `bifrost/apply.sh`
 needs the namespace `sra` that `setup.sh` made, and copies the agent's key into it;
-`run.sh` and `test.sh` stop until that key is there.
+`run.sh` and `test.sh` stop until that key is there. Bifrost's four Secrets are made by
+`apply.sh`, not its graph: a kro graph cannot make a secret value.
 
 ```bash
 ./bifrost/apply.sh
@@ -482,7 +484,8 @@ of the same Job (the pod is unchanged) with the gate replaced by a loop that req
 - **A failed run.** `run.sh` prints the Job's verdict and deletes the run's `SraRun`, so read the
   streamed output or, if the pod got past the egress gate, `runs/<run id>/` in the bucket; a pod exit of 3 means the egress gate
   failed and stored nothing. A run with no verdict 60 s after its logs end, or whose pod does not start within
-  10 minutes, leaves its `SraRun` for `cleanup.sh`.
+  10 minutes, leaves its `SraRun` for `cleanup.sh`. To remove one run alone:
+  `kubectl -n sra delete srarun <name>`, then the pod it leaves; never the Job.
 - **Where a refusal is recorded.** The gateway's own logs do not carry policy decisions; the
   `DenyDecisions` metric in `AWS/Bedrock-AgentCore` does, by default:
   `aws cloudwatch get-metric-statistics --namespace AWS/Bedrock-AgentCore --metric-name DenyDecisions ...`.
@@ -530,7 +533,7 @@ has ACK delete the RDS database (no final snapshot), its subnet group and securi
 Bifrost's IAM role and its Pod Identity association; it waits up to 25 minutes for that.
 kro deletes the namespace `bfx` last, with the Secrets in it; then the script deletes the
 agent's copy of the key in `sra`. `cleanup.sh` then deletes the runs' `SraRun` instances
-(and reads that no run's Job is left) and the `SraGateway` instance, empties the run bucket,
+and their pods, and the `SraGateway` instance, empties the run bucket,
 deletes the `SraBase` instance (the bucket, the image repository and the namespace `sra`)
 and the three graphs. Each script is done when its last line is `clean up complete`. If one ends
 `clean up incomplete` (Bifrost) or `clean up INCOMPLETE: <n> item(s) above` (the sample), the

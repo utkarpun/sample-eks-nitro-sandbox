@@ -18,7 +18,7 @@ What is code and what is not:
   and deleting it deletes the namespace last.
 - **The four Secrets** (the database password, the encryption key, the admin login and the
   agent's key) are made by `apply.sh` from random bytes, once the graph has made the
-  namespace: their values are random, and a kro graph cannot generate a random value.
+  namespace: their values must be secret, and a kro graph cannot make a secret value.
 - kro and ACK are the sample's own EKS managed capabilities, from `bootstrap/`.
 - `apply.sh`, `test.sh` and `destroy.sh` wrap them: check the prerequisites, read the
   cluster's VPC, make the Secrets, apply, wait and read back.

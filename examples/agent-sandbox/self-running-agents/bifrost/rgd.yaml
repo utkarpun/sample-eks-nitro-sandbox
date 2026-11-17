@@ -6,8 +6,8 @@
 # and Bifrost's network policy.
 # The Bifrost Deployment itself comes from the official Helm chart (values.yaml);
 # kro has no Helm resource, so apply.sh installs the chart once this instance is
-# ACTIVE. The four Secrets stay made by apply.sh: their values are random, and a
-# kro graph cannot generate a random value.
+# ACTIVE. The four Secrets stay made by apply.sh: their values must be secret, and a
+# kro graph cannot make a secret value.
 #
 # Cluster scoped: the instance has no namespace, since it is the thing that makes
 # the namespace (as kro/base-rgd.yaml does for sra). Every namespaced child names

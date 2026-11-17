@@ -1,5 +1,5 @@
-# SraRun: one agent run. Its one child is the run's Job, the former
-# deploy/run-job.yaml with each placeholder taken from the instance's spec.
+# SraRun: one agent run. Its one child is the run's Job, each placeholder of the
+# old per-run Job manifest taken from the instance's spec.
 # scripts/run.sh makes one instance per run (deploy/run.yaml) and ends the run
 # by deleting the instance, which deletes the Job.
 #
