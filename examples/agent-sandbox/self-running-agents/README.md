@@ -30,7 +30,7 @@ for Bifrost's PostgreSQL database on Amazon RDS, which bills until `bifrost/dest
 with `clean up complete` ([what it costs](bifrost/README.md#what-it-costs)).
 
 ```bash
-git clone -b self-running-agents https://github.com/utkarpun/sample-eks-nitro-sandbox.git
+git clone -b self-running-agents-sync-20261117 https://github.com/utkarpun/sample-eks-nitro-sandbox.git
 cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 ```
 
@@ -65,7 +65,7 @@ cd sample-eks-nitro-sandbox/examples/agent-sandbox/self-running-agents
 configured from the cluster and cannot reach it before it exists (`cluster/main.tf`). The
 cluster's API endpoint is public and open only to `endpoint_public_access_cidrs`: give your
 own address. `cluster_name` and `region` default to `sandbox-demo` and `us-west-2`. Then
-point kubectl at it.
+point kubectl at it (with your own `cluster_name` and `region` if you set them).
 
 ```bash
 cd cluster
@@ -115,7 +115,7 @@ role per application" (`latest/bpg/security/iam.adoc:1078-1084` at
 `aws/aws-eks-best-practices` `edc514fac86518b50129401c0cffd1f7981d7ec5`). The role trusts
 only Pod Identity sessions tagged with this cluster, this namespace and the `agent`
 ServiceAccount (`iam.adoc:940-947`, same commit). ACK creates each resource by its name and
-fails on a name that is already taken (no adoption is configured, `kro/NOTES.md`), so it
+fails on a name that is already taken (the graphs configure no adoption), so it
 never takes over another demo's role.
 
 **The tool door.** The gateway authenticates the caller by its SigV4 signature, so the
@@ -203,8 +203,9 @@ that runs code or opens a connection; a repository agent that is given Bash, fil
 a credential can use every one of them, so close them before you add such a tool, or let anyone else create pods in the namespace.
 
 **Name rules match addresses.** The egress rule's names are resolved to addresses and the
-rule matches the addresses (the EKS guide: resolved IPs go into an eBPF map and egress is
-filtered by IP), not the name a client sends inside TLS. A host that shares an address with
+rule matches the addresses (Amazon EKS User Guide,
+[*Use Network Policies with EKS Auto Mode*](https://docs.aws.amazon.com/eks/latest/userguide/auto-net-pol.html):
+resolved IPs go into an eBPF map and egress is filtered by IP), not the name a client sends inside TLS. A host that shares an address with
 an allowed name is reachable too. On this cluster the learned addresses were shared by
 every pod on the node, so a pod can reach a name another pod on the same node
 is allowed. The run bucket's name is the clearest case: every S3 bucket in the Region is
@@ -212,7 +213,7 @@ served from the same addresses, so the rule lets the pod reach any bucket. The r
 write only under `runs/` in the run bucket, but public buckets are readable and writable
 without a role.
 
-**DNS is open.** Port 53 is allowed to any address. EKS documents a DNS filter for name
+**DNS is open.** Port 53 is allowed to any address. The same page documents a DNS filter for name
 rules, but on this cluster every name still resolved from an agent pod, so treat DNS
 as a channel that can carry data out. The EKS Best Practices Guide's example allows DNS only
 to `kube-dns` in `kube-system`, UDP 53 (`latest/bpg/security/network.adoc:100-129`, same
@@ -223,8 +224,10 @@ on a cluster where the canary is reachable, but the window exists for every pod 
 namespace. The NodeClass-wide (on the built-in NodePools, every node) way to close it is the
 NodeClass's `networkPolicy: DefaultDeny` (the field the EKS Best Practices Guide shows, with
 `DefaultAllow`, at `latest/bpg/security/automode.adoc:162-172`; the two values are listed in
-the EKS NodeClass specification, and the VPC CNI documents the same deny-until-configured
-behavior as strict mode). Not exercised by this sample.
+the Amazon EKS User Guide's
+[*Create a Node Class for Amazon EKS*](https://docs.aws.amazon.com/eks/latest/userguide/create-node-class.html),
+and [*Restrict Pod network traffic with Kubernetes network policies*](https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html)
+documents the same deny-until-configured behavior for the VPC CNI as strict mode). Not exercised by this sample.
 
 **The model call.** The agent sends its model calls to Bifrost with its key, which
 `agent/settings.json`'s `apiKeyHelper` reads from the Secret `bifrost-agent-key`, and Bifrost
@@ -236,7 +239,8 @@ invocations and tokens per model (`AWS/Bedrock`), and model invocation logging, 
 it on, keeps the request and response bodies.
 
 **No in-guest policy.** An isolated sandbox runs no in-guest policy unless one is supplied;
-AWS documents in-guest Cedar for both modes, our earlier test covered confidential mode only,
+the Amazon EKS User Guide documents in-guest Cedar for both modes
+([*Sandboxing on Amazon EKS with isolated and confidential pods*](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing.html)), our earlier test covered confidential mode only,
 and this sample supplies none. Image signing (AWS Signer) was tested only in confidential
 mode. The Cedar policy here is the gateway's, in AWS. It says nothing about what runs
 inside the pod.
@@ -245,7 +249,8 @@ inside the pod.
 on or runs outside `isolated-sandbox`. It does not refuse a privileged container, a
 `hostPath` volume, `hostNetwork`, a Secret in `env` or a token mounted on purpose as a
 projected volume, and an isolated sandbox does not refuse the first two either; a
-`hostNetwork` pod fails to start in a sandbox (AWS's sandboxing considerations page). Add
+`hostNetwork` pod fails to start in a sandbox (Amazon EKS User Guide,
+[*Considerations*](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-limitations.html)). Add
 those rules, or a policy engine, before anyone but you creates pods in the
 namespace.
 
@@ -263,8 +268,8 @@ namespace can mint such a role and bind it to a pod. Keep the ACK kinds to clust
 
 **Instance metadata.** An isolated sandbox runs its own IMDSv2 metadata service at
 `169.254.169.254`, inside the sandbox, so the egress rule does not reach it. It serves only
-the Region, Availability Zone and partition, and 404 for everything else, credentials
-included ([Pod Identity and credentials](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-metadata-credentials.html)).
+the Region, Availability Zone, Availability Zone ID, services domain and partition, and 404
+for everything else, credentials included (Amazon EKS User Guide, [*Pod Identity and credentials*](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-metadata-credentials.html)).
 A sandbox Cedar policy generated with `--deny-imds` turns it off; generate it with
 `--with-pod-identity` as well, or the pod's AWS calls fail.
 
@@ -299,7 +304,6 @@ with them the pods need no route to the internet. This sample uses the public en
 | `bootstrap/*.tf` | Step 0: the EKS managed kro and ACK capabilities, their IAM role, and kro's RBAC for the ACK kinds |
 | `kro/base-rgd.yaml`, `kro/base.yaml` | The `SraBase` graph (namespace, run bucket, image repository) and its one instance |
 | `kro/gateway-rgd.yaml`, `kro/gateway.yaml` | The `SraGateway` graph (gateway, Cedar policy, tool, roles, Pod Identity, admission, egress, the agent's ConfigMap) and its one instance |
-| `kro/NOTES.md` | Which setup step each graph resource replaced, and the CRD fields checked |
 | `Dockerfile`, `.dockerignore` | The agent image: Claude Code, the bridge, and `agent/` |
 | `agent/run.sh` | Runs in the pod: egress gate, then the agent or a tool listing, then stores the output |
 | `agent/settings.json` | Built-in tools are off (`--tools ""` in agent/run.sh); settings.json allows only `mcp__gateway`, and its `apiKeyHelper` reads the Bifrost key |
@@ -333,14 +337,16 @@ terraform apply tfplan
 cd ..
 ```
 
+On the `cluster/` path `<CLUSTER_NAME>` is `sandbox-demo`, unless you set `cluster_name`.
+
 ```text
 TODO: output from the fresh run
 ```
 
-If the cluster already runs its own kro or ACK controllers, read
-[kro](https://docs.aws.amazon.com/eks/latest/userguide/kro-comparison.html) and
-[ACK](https://docs.aws.amazon.com/eks/latest/userguide/ack-comparison.html) capability
-comparisons first: the ACK capability installs the CRD versions it ships.
+If the cluster already runs its own kro or ACK controllers, read the Amazon EKS User Guide's
+[*Comparing EKS Capability for kro to self-managed kro*](https://docs.aws.amazon.com/eks/latest/userguide/kro-comparison.html) and
+[*Comparing EKS Capability for ACK to self-managed ACK*](https://docs.aws.amazon.com/eks/latest/userguide/ack-comparison.html)
+first: the ACK capability installs the CRD versions it ships.
 
 **Step 1: copy the settings and fill them in.**
 
@@ -351,6 +357,9 @@ cp .env.example .env
 
 `KUBE_CONTEXT` must be the context of `CLUSTER_NAME`: the Pod Identity association is made
 on `CLUSTER_NAME`, the pods run on the context, and a mismatch is a run with no credentials.
+After `aws eks update-kubeconfig`, the context is the cluster's ARN, which
+`kubectl config current-context` prints. Set `AWS_PROFILE` too if the cluster's account is
+not your CLI's default.
 
 **Step 2: set everything up.** `setup.sh` checks the runtime class, network policy
 enforcement and the kro and ACK kinds, and changes none of them. It applies the two graphs
