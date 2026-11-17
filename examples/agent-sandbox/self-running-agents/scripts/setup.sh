@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Set up the self-running-agents sample from its IaC: the two kro graphs in
-# kro/, whose AWS objects the EKS managed ACK capability creates. This script
+# Set up the self-running-agents sample from its IaC: the three kro graphs in
+# kro/ (sra-run is the per-run graph scripts/run.sh uses), whose AWS objects the EKS managed ACK capability creates. This script
 # makes no AWS resource itself. It checks what the sample needs, applies the
 # graphs and the SraBase instance (namespace, run bucket, image repository),
 # uploads the tool's code to the bucket and pushes the agent image (data and a
@@ -53,8 +53,8 @@ render_instance() {
 }
 
 step "1/4 the graphs and the SraBase instance"
-kc_cluster apply -f "$K/base-rgd.yaml" -f "$K/gateway-rgd.yaml"
-kc_cluster wait --for=jsonpath='{.status.state}'=Active rgd/sra-base rgd/sra-gateway --timeout=120s
+kc_cluster apply -f "$K/base-rgd.yaml" -f "$K/gateway-rgd.yaml" -f "$K/run-rgd.yaml"
+kc_cluster wait --for=jsonpath='{.status.state}'=Active rgd/sra-base rgd/sra-gateway rgd/sra-run --timeout=120s
 render_instance "$K/base.yaml" > "$WORK/base.yaml"
 kc_cluster apply -f "$WORK/base.yaml"
 wait_active srabase 300

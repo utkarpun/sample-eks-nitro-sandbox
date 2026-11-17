@@ -25,7 +25,7 @@ RUN python3 -m venv /opt/mcp \
 # The agent's configuration, baked in, so the image decides which tools the
 # agent holds: agent/run.sh turns Claude Code's built-in tools off (--tools "")
 # and settings.json allows only the gateway's. The gateway's address is not baked in: it comes from the run's
-# ConfigMap (deploy/run-job.yaml), because it is known only after setup.
+# ConfigMap (kro/run-rgd.yaml), because it is known only after setup.
 COPY agent/settings.json agent/claude.json agent/mcp_call.py agent/run.sh /opt/agent/
 RUN chmod 0755 /opt/agent/run.sh
 

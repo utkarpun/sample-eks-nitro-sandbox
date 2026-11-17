@@ -145,7 +145,7 @@ TODO: output from the fresh run
 
 A caller sets `ANTHROPIC_BASE_URL=http://bifrost.bfx.svc.cluster.local:8080/anthropic`,
 names the model `bedrock/<model id>`, and reads its key from the Secret `bifrost-agent-key`.
-The agent does this in `deploy/run-job.yaml` and `agent/settings.json`.
+The agent does this in `kro/run-rgd.yaml` and `agent/settings.json`.
 
 **Network policy.** This fork ships Bifrost's network policy (and the agent's), though the
 upstream repository's rules say a new sample ships none: it is what keeps Bifrost reachable
