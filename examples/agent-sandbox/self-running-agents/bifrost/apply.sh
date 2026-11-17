@@ -75,7 +75,8 @@ namespace_is_ours "$BIFROST_NAMESPACE" "$BF_MANAGED_BY" \
 # 5. Secrets, made once from random bytes. Values go through files, never the
 #    command line. These stay in the script: their values must be secret, and a kro
 #    graph cannot make a secret value. The graph's database waits for
-#    bifrost-db (rgd.yaml, dbSecret).
+#    bifrost-db (rgd.yaml, dbSecret), and its copy of the agent's key in the
+#    agent's namespace for bifrost-agent-key (agentKey).
 rand() { openssl rand -hex 24; }
 secret_once() {  # <namespace> <name> <key>=<file> ...
   local ns="$1" name="$2"; shift 2
@@ -90,10 +91,6 @@ secret_once "$BIFROST_NAMESPACE" bifrost-db password="$work/db"
 secret_once "$BIFROST_NAMESPACE" bifrost-encryption encryption-key="$work/enc"
 secret_once "$BIFROST_NAMESPACE" bifrost-admin username="$work/user" password="$work/admin"
 secret_once "$BIFROST_NAMESPACE" bifrost-agent-key key="$work/vk"
-# The same key, in the agent's namespace, for the agent to read.
-kb get secret bifrost-agent-key -o jsonpath='{.data.key}' \
-  | python3 -c 'import base64,sys; sys.stdout.write(base64.b64decode(sys.stdin.read()).decode())' > "$work/vk-now"
-secret_once "$AGENT_NAMESPACE" bifrost-agent-key key="$work/vk-now"
 
 echo "waiting for the graph (the RDS instance is most of the wait)"
 kc_cluster wait --for=jsonpath='{.status.state}'=ACTIVE bifrostbackend/bifrost --timeout=1200s >/dev/null \

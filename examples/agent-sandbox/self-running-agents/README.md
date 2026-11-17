@@ -264,6 +264,7 @@ namespace.
 ServiceAccount, so a pod created in the namespace without the label but with
 `serviceAccountName: agent` gets the agent's AWS credentials and the cluster's default
 egress (`DefaultAllow` here). Keep `create pods` in the namespace to yourself.
+Creating a `SraRun` gives the same: kro makes its Job, and any `image` runs as `agent` with its Pod Identity role and the Bifrost key. Keep `create` on `sraruns` to yourself too.
 
 **Whoever can create ACK objects holds the ACK role.** The ACK capability acts with one
 role for every namespace, and that role may manage any IAM role named `sra-*` and pass it
@@ -383,7 +384,7 @@ TODO: output from the fresh run
 ```
 
 **Step 2b: set up Bifrost.** Follow [Bifrost's README](bifrost/README.md). `bifrost/apply.sh`
-needs the namespace `sra` that `setup.sh` made, and copies the agent's key into it;
+needs the namespace `sra` that `setup.sh` made, and its graph copies the agent's key into it;
 `run.sh` and `test.sh` stop until that key is there. Bifrost's four Secrets are made by
 `apply.sh`, not its graph: a kro graph cannot make a secret value.
 
@@ -531,8 +532,8 @@ aws eks describe-cluster --name <CLUSTER_NAME> --region us-west-2 \
 `bifrost/destroy.sh` uninstalls Bifrost's Helm release and deletes its graph instance, which
 has ACK delete the RDS database (no final snapshot), its subnet group and security group,
 Bifrost's IAM role and its Pod Identity association; it waits up to 25 minutes for that.
-kro deletes the namespace `bfx` last, with the Secrets in it; then the script deletes the
-agent's copy of the key in `sra`. `cleanup.sh` then deletes the runs' `SraRun` instances
+kro deletes the agent's copy of the key in `sra`, and the namespace `bfx` last, with the
+Secrets in it. `cleanup.sh` then deletes the runs' `SraRun` instances
 and their pods, and the `SraGateway` instance, empties the run bucket,
 deletes the `SraBase` instance (the bucket, the image repository and the namespace `sra`)
 and the three graphs. Each script is done when its last line is `clean up complete`. If one ends

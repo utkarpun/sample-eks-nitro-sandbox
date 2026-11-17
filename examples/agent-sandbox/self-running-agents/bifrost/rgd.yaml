@@ -2,8 +2,9 @@
 # AWS side through ACK: the Postgres store on RDS (security group, subnet group,
 # DB instance), the role Bifrost calls Bedrock with and its Pod Identity
 # association. Kubernetes side: Bifrost's namespace, the ServiceAccount, a fixed
-# in-namespace name for the database (Service bifrost-db), the pricing ConfigMap
-# and Bifrost's network policy.
+# in-namespace name for the database (Service bifrost-db), the pricing ConfigMap,
+# Bifrost's network policy and the agent's copy of its key in the agent's
+# namespace.
 # The Bifrost Deployment itself comes from the official Helm chart (values.yaml);
 # kro has no Helm resource, so apply.sh installs the chart once this instance is
 # ACTIVE. The four Secrets stay made by apply.sh: their values must be secret, and a
@@ -266,3 +267,25 @@ spec:
         data:
           pricing.json: ${schema.spec.pricingJSON}
           model-parameters.json: ${schema.spec.modelParametersJSON}
+
+    # The agent's key, made by apply.sh once the namespace is there. Read only;
+    # agentKeyCopy waits for it.
+    - id: agentKey
+      externalRef:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: bifrost-agent-key
+          namespace: ${ns.metadata.name}
+
+    # The same key in the agent's namespace, for the agent to read
+    # (kro/run-rgd.yaml mounts it).
+    - id: agentKeyCopy
+      template:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: bifrost-agent-key
+          namespace: ${schema.spec.agentNamespace}
+        data:
+          key: ${agentKey.data.?key}

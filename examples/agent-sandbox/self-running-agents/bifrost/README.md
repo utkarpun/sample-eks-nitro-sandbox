@@ -13,8 +13,8 @@ What is code and what is not:
   Controllers for Kubernetes (ACK), and its one instance, `instance.yaml`: Bifrost's
   namespace, the Postgres database on Amazon RDS with its security group and subnet group,
   Bifrost's IAM role and its EKS Pod Identity association, the ServiceAccount, a fixed name
-  for the database (`Service bifrost-db`), the pricing ConfigMap (from `pricing/`) and
-  Bifrost's network policy. The instance is cluster scoped, because it makes the namespace,
+  for the database (`Service bifrost-db`), the pricing ConfigMap (from `pricing/`),
+  Bifrost's network policy and the agent's copy of its key in `sra`. The instance is cluster scoped, because it makes the namespace,
   and deleting it deletes the namespace last.
 - **The four Secrets** (the database password, the encryption key, the admin login and the
   agent's key) are made by `apply.sh` from random bytes, once the graph has made the

@@ -51,7 +51,7 @@ if [[ $BASE_GONE -eq 1 ]]; then
     1) echo "  no SraRun kind on the cluster" ;;
     *) fail "could not read crd sraruns.kro.run" ;;
   esac
-  kc delete pods -l app.kubernetes.io/name=agent --ignore-not-found --wait=true --timeout=120s || fail "the runs' pods"
+  kc delete pods -l app.kubernetes.io/name=agent --wait=true --timeout=120s || fail "the runs' pods"
 else echo "  no SraBase $INSTANCE, so no namespace of the sample's to clean"; fi
 
 step "2/5 the SraGateway instance"

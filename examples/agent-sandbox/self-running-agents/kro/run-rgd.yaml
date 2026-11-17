@@ -17,7 +17,7 @@
 # Namespaced: an instance lives in the sample's namespace (sra), with the
 # ServiceAccount agent, the ConfigMap agent-config and the Secret
 # bifrost-agent-key its Job uses, which the SraGateway instance and
-# bifrost/apply.sh make first. Applied by setup.sh with the other two graphs.
+# the Bifrost graph (bifrost/rgd.yaml) make first. Applied by setup.sh with the other two graphs.
 #
 # Never remove a field from spec.schema once this RGD is live: kro refuses the
 # instance CRD update and the instance stops reconciling, deletion included

@@ -32,7 +32,8 @@ case $rc in
     ;;
 esac
 
-# The agent's copy of the key, only in the sample's own namespace.
+# The agent's copy of the key, which the instance delete removes; this removes one
+# left without an instance, only in the sample's own namespace.
 rc=0; resource_exists kc_cluster namespace "$AGENT_NAMESPACE" || rc=$?
 case $rc in
   0) if namespace_is_ours "$AGENT_NAMESPACE" "$SAMPLE"; then
